@@ -1,0 +1,23 @@
+{
+    "type": "object",
+    "properties": {
+        "data": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/data_element" }
+        }
+    },
+    "$defs": {
+        "data_element": {
+            "type": "object",
+            "required": ["sample_id", "sample_project"],
+            "properties": {
+                "sample_id": {
+                    "type": "string"
+                },
+                "sample_project": {
+                    "type": "string"
+                }
+            }
+        }
+    }       
+}
