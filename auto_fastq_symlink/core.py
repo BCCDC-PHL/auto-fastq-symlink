@@ -78,9 +78,9 @@ def _find_libraries(run, samplesheet, fastq_extensions):
     run_fastq_files = set(filter(lambda x: all([has_correct_extension(x), os.path.isfile(os.path.join(run['fastq_directory'], x))]), run_fastq_dir_contents))
 
     for item in samplesheet[libraries_section]:
-        library = item['sample_id']
-        logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
         library = {}
+        library_id = item['sample_id']
+        logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
         library['library_id'] = library_id
         library['project_id'] = item[project_header]
         r1_fastq_filename = list(filter(lambda x: re.match(library_id + '.*' + '_R1_' + '.*', x), run_fastq_files))[0]
@@ -112,9 +112,10 @@ def find_runs(run_parent_dirs, fastq_extensions):
         subdirs = os.scandir(run_parent_dir)
         for subdir in subdirs:
             instrument_type = None
-            if re.match(miseq_run_id_regex, subdir.name):
+            run_id = subdir.name
+            if re.match(miseq_run_id_regex, run_id):
                 instrument_type = "miseq"
-            elif re.match(nextseq_run_id_regex, subdir.name):
+            elif re.match(nextseq_run_id_regex, run_id):
                 instrument_type = "nextseq"
             if subdir.is_dir() and instrument_type != None:
                 samplesheet_paths = ss.find_samplesheets(subdir.path, instrument_type)
@@ -122,7 +123,7 @@ def find_runs(run_parent_dirs, fastq_extensions):
                 if fastq_directory != None:
                     logging.debug(json.dumps({"event_type": "sequencing_run_found", "sequencing_run_id": run_id}))
                     runs[subdir.name] = {
-                        "run_id": subdir.name,
+                        "run_id": run_id,
                         "instrument_type": instrument_type,
                         "samplesheet_files": samplesheet_paths,
                         "run_directory": subdir.path,
