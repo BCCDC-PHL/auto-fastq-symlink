@@ -1,6 +1,7 @@
-import os
+import datetime
 import json
 import logging
+import os
 import re
 import time
 
@@ -125,21 +126,22 @@ def find_symlinks(projects):
     """
     symlinks_by_project = {}
     for project_id, project in projects.items():
+        symlinks_by_project[project_id] = []
         fastq_symlinks_dir = project['fastq_symlinks_dir']
         if os.path.exists(fastq_symlinks_dir):
             symlinks = []
-            dir_contents = os.scandir(fastq_symlinks_dir)
-            for dir_item in dir_contents:
-                if os.path.islink(dir_item):
-                    path = dir_item.path
-                    target = os.path.realpath(dir_item.path)
-                    symlink = {
-                        "path": path,
-                        "target": target,
-                    }
-                    symlinks.append(symlink)
-                    
-            symlinks_by_project[project_id] = symlinks
+            project_symlinks_by_run_dirs = os.scandir(fastq_symlinks_dir)
+            for project_symlinks_by_run_dir in project_symlinks_by_run_dirs:
+                project_symlinks_by_run_dir_contents = os.scandir(project_symlinks_by_run_dir)
+                for dir_item in project_symlinks_by_run_dir_contents:
+                    if os.path.islink(dir_item):
+                        path = dir_item.path
+                        target = os.path.realpath(dir_item.path)
+                        symlink = {
+                            "path": path,
+                            "target": target,
+                        }
+                        symlinks_by_project[project_id].append(symlink)
             
     return symlinks_by_project
 
@@ -148,18 +150,84 @@ def determine_symlinks_to_create(config):
     """
     """
     symlinks_to_create_by_project_id = {}
-    existing_symlinks = db.get_existing_symlinks(config)
-    
+
+    libraries_by_project_id = {}
+
+    existing_symlinks = db.get_symlinks(config)
+    existing_project_target_pairs = set()
+    for symlink in existing_symlinks:
+        project_target_pair = (symlink['project_id'], symlink['target'])
+        existing_project_target_pairs.add(project_target_pair)
+
+    for project_id in config['projects']:
+        symlinks_to_create_by_project_id[project_id] = []
+        project_libraries = db.get_libraries_by_project_id(config, project_id)
+        for library in project_libraries:
+            project_fastq_path_r1_pair = (library['project_id'], library['fastq_path_r1'])
+            if project_fastq_path_r1_pair not in existing_project_target_pairs:
+                fastq_path_r1 = {
+                    'project_id': library['project_id'],
+                    'sequencing_run_id': library['sequencing_run_id'],
+                    'target': library['fastq_path_r1'],
+                }
+                symlinks_to_create_by_project_id[project_id].append(fastq_path_r1)
+                fastq_path_r2 = {
+                    'project_id': library['project_id'],
+                    'sequencing_run_id': library['sequencing_run_id'],
+                    'target': library['fastq_path_r2'],
+                }
+                symlinks_to_create_by_project_id[project_id].append(fastq_path_r2)
 
     return symlinks_to_create_by_project_id
 
 
-def create_symlinks(config, symlinks_to_create):
+def create_symlinks(config, symlinks_to_create_by_project_id):
     """
     """
+    for project_id, symlinks in symlinks_to_create_by_project_id.items():
+        project_fastq_symlinks_dir = config['projects'][project_id]['fastq_symlinks_dir']
 
-    for symlink in symlinks_to_create:
-        pass
+        symlinks_complete = {'num_symlinks_created': 0}
+        for symlink in symlinks:
+            symlink_parent_dir = os.path.join(project_fastq_symlinks_dir, symlink['sequencing_run_id'])
+
+            if not os.path.exists(symlink_parent_dir):
+                os.makedirs(symlink_parent_dir)
+
+            if config['projects'][project_id]['simplify_symlink_filenames']:
+                target_basename = os.path.basename(symlink['target'])
+                r1_r2_match = re.search("_(R[12])_", target_basename)
+                if r1_r2_match:
+                    r1_r2 = r1_r2_match.group(1)
+                else:
+                    r1_r2 = ""
+                symlink_filename = os.path.basename(symlink['target']).split('_')[0] + '_' + r1_r2 + '.fastq.gz'
+            else:
+                symlink_filename = os.path.basename(symlink['target'])
+
+            symlink['path'] = os.path.join(symlink_parent_dir, symlink_filename)
+
+            # The order and naming of the parameters to os.symlink are a bit confusing
+            # src = 'target' = the original fastq file
+            # dst = 'path' = the symlink
+            try:
+                os.symlink(src=symlink['target'], dst=symlink['path'])
+            except FileExistsError as e:
+                logging.warning(json.dumps({
+                    "event_type": "attempted_to_create_existing_symlink",
+                    "symlink_target": symlink['target'],
+                    "symlink_path": symlink['path'],
+                }))
+
+            symlinks_complete['num_symlinks_created'] += 1
+
+            timestamp = datetime.datetime.now().isoformat()
+            symlinks_complete['timestamp'] = timestamp
+
+            with open(os.path.join(symlink_parent_dir, 'symlinks_complete.json'), 'w') as f:
+                f.write(json.dumps(symlinks_complete, indent=2) + '\n')
+                
+    return symlinks_complete
 
 
 def scan(config):
@@ -168,25 +236,36 @@ def scan(config):
     then looking for all existing symlinks and storing them to the database.
     At the end of a scan, we should be able to determine which (if any) symlinks need to be created.
     """
-    logging.info("Collecting project info...")
+    logging.info(json.dumps({"event_type": "scan_start"}))
+    logging.debug(json.dumps({"event_type": "collect_projects_start"}))
     projects = collect_project_info(config)
-    logging.info("Storing projects to database...")
+    num_projects = len(projects)
+    logging.debug(json.dumps({"event_type": "collect_projects_complete", "num_projects": num_projects}))
+
+    logging.debug(json.dumps({"event_type": "store_projects_start"}))
     db.store_projects(config, projects)
-    logging.info("Searching for runs...")
+    logging.debug(json.dumps({"event_type": "store_projects_complete"}))
+
+    logging.debug(json.dumps({"event_type": "find_runs_start"}))
     runs = find_runs(config['run_parent_dirs'], config['fastq_extensions'])
     num_runs = len(runs)
-    logging.info("Num runs found: " + str(num_runs))
-    # print(json.dumps(runs, indent=2))
-    logging.info("Storing runs to database...")
+    logging.debug(json.dumps({"event_type": "find_runs_complete", "num_runs_found": num_runs}))
+
+    logging.debug(json.dumps({"event_type": "store_runs_start"}))
     db.store_runs(config, runs)
-    logging.info("Searching for symlinks...")
+    logging.debug(json.dumps({"event_type": "store_runs_complete"}))
+
+    logging.debug(json.dumps({"event_type": "find_symlinks_start"}))
     symlinks_by_destination_dir = find_symlinks(config['projects'])
     num_symlinks = len(symlinks_by_destination_dir)
-    logging.info("Num symlinks found: " + str(num_symlinks))
-    logging.info("Storing symlinks to database...")
+    logging.debug(json.dumps({"event_type": "find_symlinks_complete", "num_symlinks_found": num_symlinks}))
+    logging.debug(json.dumps({"event_type": "store_symlinks_start"}))
     db.store_symlinks(config, symlinks_by_destination_dir)
-    logging.info("Deleting any nonexistent symlinks from database...")
+    logging.debug(json.dumps({"event_type": "store_symlinks_complete"}))
+    logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_start"}))
     db.delete_nonexistent_symlinks(config)
+    logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_complete"}))
+    logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs, "num_symlinks_found": num_symlinks}))
 
 
 def symlink(config):
@@ -194,11 +273,17 @@ def symlink(config):
     Determine which symlinks need to be created, based on the current state of the database.
     Then create all symlinks that need to be created.
     """
-    logging.info(json.dumps({"event_type": "determine_symlinks_start"}))
+    logging.info(json.dumps({"event_type": "symlink_start"}))
+    logging.debug(json.dumps({"event_type": "determine_symlinks_start"}))
     symlinks_to_create = determine_symlinks_to_create(config)
-    num_symlinks_to_create = len(symlinks_to_create)
-    logging.info(json.dumps({"event_type": "determine_symlinks_complete", "num_symlinks_to_create": num_symlinks_to_create}))
-    logging.info(json.dumps({"event_type": "create_symlinks_start"}))
-    create_symlinks(config, symlinks_to_create)
-    logging.info(json.dumps({"event_type": "create_symlinks_complete"}))
+    num_symlinks_to_create = 0
+    for project_id, symlinks in symlinks_to_create.items():
+        num_symlinks_to_create += len(symlinks)
+    logging.debug(json.dumps({"event_type": "determine_symlinks_complete", "num_symlinks_to_create": num_symlinks_to_create}))
+
+    logging.debug(json.dumps({"event_type": "create_symlinks_start"}))
+    symlinks_complete = create_symlinks(config, symlinks_to_create)
+    num_symlinks_created = symlinks_complete['num_symlinks_created']
+    logging.debug(json.dumps({"event_type": "create_symlinks_complete"}))
+    logging.info(json.dumps({"event_type": "symlink_complete", "num_symlinks_created": num_symlinks_created}))
 

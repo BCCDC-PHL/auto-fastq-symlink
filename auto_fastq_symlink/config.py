@@ -13,16 +13,24 @@ def parse_list(list_path):
 
 
 def parse_projects_definition_file(projects_definition_file_path):
+    """
+    """
     projects = {}
     with open(projects_definition_file_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if row['simplify_symlink_filenames'].lower() in ['true', '1', 't']:
+                row['simplify_symlink_filenames'] = True
+            else:
+                row['simplify_symlink_filenames'] = False
             projects[row['project_id']] = row
 
     return projects
 
 
 def load_config(config_path):
+    """
+    """
     config = None
     with open(config_path, 'r') as f:
         config = json.load(f)

@@ -112,15 +112,14 @@ def _store_run(session, run):
 
 def _update_run(session, run):
     run_id = run['run_id']
-    logging.debug("Run: " + run_id + " exists. Updating...")
+    logging.debug(json.dumps({"event_type": "update_run_start", "run_id": run_id}))
     existing_run = session.query(SequencingRun).filter(SequencingRun.sequencing_run_id == run_id).first()
 
     existing_run.samplesheet = run['parsed_samplesheet']
     existing_run.fastq_directory = run['fastq_directory']
 
-    logging.debug("Updating run: " + run_id)
-
     session.commit()
+    logging.debug(json.dumps({"event_type": "update_run_complete", "run_id": run_id}))
 
     _update_libraries(session, run)
     
@@ -184,10 +183,11 @@ def delete_nonexistent_symlinks(config):
 
     for symlink in existing_symlinks:
         if not os.path.exists(symlink.path):
-            symlink.delete()
+            session.delete(symlink)
+            session.commit()
     
 
-def get_existing_symlinks(config):
+def get_symlinks(config):
     """
     """
     connection_uri = config['database_connection_uri']
@@ -203,6 +203,40 @@ def get_existing_symlinks(config):
         
 
     return existing_symlinks
+
+
+def get_libraries(config):
+    """
+    """
+    connection_uri = config['database_connection_uri']
+    engine = create_engine(connection_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    query_result = session.query(Library).all()
+
+    all_libraries = []
+    for row in query_result:
+        all_libraries.append(util.row2dict(row))
+
+    return all_libraries
+
+
+def get_libraries_by_project_id(config, project_id):
+    """
+    """
+    connection_uri = config['database_connection_uri']
+    engine = create_engine(connection_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    query_result = session.query(Library).filter(Library.project_id == project_id)
+
+    project_libraries = []
+    for row in query_result:
+        project_libraries.append(util.row2dict(row))
+
+    return project_libraries
 
     
     
