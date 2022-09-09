@@ -11,7 +11,9 @@ setup(
         ]
     },
     scripts=[],
-    package_data={},
+    package_data={
+        "auto_fastq_symlink.resources": ["*.json"],
+    },
     install_requires=[
         "sqlalchemy==1.4.40",
         "alembic==1.8.0",
