@@ -122,7 +122,7 @@ def _find_libraries(run, samplesheet, fastq_extensions):
     
     for item in samplesheet[libraries_section]:
         library = {}
-        library_id = item[library_id_header]
+        library_id = item[library_id_header].replace('_', '-') # There shouldn't be underscores in library IDs, but if there are, they get swapped with '-' in fastq filenames.
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
         library['library_id'] = library_id
         library['project_id'] = item[project_header]
