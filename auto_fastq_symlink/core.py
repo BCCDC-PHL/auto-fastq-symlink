@@ -54,32 +54,75 @@ def _find_fastq_directory(run_dir_path, instrument_type):
         else:
             fastq_directory = None
 
-    return fastq_directory    
+    return fastq_directory
+
+
+def _determine_libraries_section(samplesheet, instrument_type):
+    """
+    """
+    if instrument_type == 'miseq':
+        libraries_section = 'data'
+    elif instrument_type == 'nextseq':
+        libraries_section = 'cloud_data'
+    else:
+        libraries_section = None
+
+    return libraries_section
+
+
+def _determine_project_header(samplesheet, instrument_type):
+    """
+    """
+    if instrument_type == 'miseq':
+        project_header = 'sample_project'
+    elif instrument_type == 'nextseq':
+        project_header = 'project_name'
+    else:
+        project_header = None
+
+    return project_header
+
+
+def _determine_library_id_header(samplesheet, instrument_type):
+    """
+    For MiSeq runs, the SampleSheet has two fields that can either be used for the library ID.
+    Either 'Sample_ID' or 'Sample_Name' may be used to input the library ID. The other field
+    might be blank, or it might be filled with 'S1', 'S2', 'S3', etc.
+    In order to find the correct field to use for the library ID, we need to look through those
+    columns to check which was actually used for the librar ID on this run.
+    """
+    libraries_section = _determine_libraries_section(samplesheet, instrument_type)
+    if instrument_type == 'miseq':
+        sample_ids = [library['sample_id'] for library in samplesheet[libraries_section]]
+        sample_names = [library['sample_name'] for library in samplesheet[libraries_section]]
+        if all([sample_id == "" for sample_id in sample_ids]) or all([re.match("S\d+", sample_id) for sample_id in sample_ids]):
+            library_id_header = 'sample_name'
+        else:
+            library_id_header = 'sample_id'
+    elif instrument_type == 'nextseq':
+        library_id_header = 'sample_id'
+    else:
+        library_id_header = None
+
+    return library_id_header        
 
 
 def _find_libraries(run, samplesheet, fastq_extensions):
     """
     """
     libraries = []
-    libraries_section = None
-    if run['instrument_type'] == 'miseq':
-        libraries_section = 'data'
-    elif run['instrument_type'] == 'nextseq':
-        libraries_section = 'cloud_data'
-
-    project_header = None
-    if run['instrument_type'] == 'miseq':
-        project_header = 'sample_project'
-    elif run['instrument_type'] == 'nextseq':
-        project_header = 'project_name'
+    libraries_section = _determine_libraries_section(samplesheet, run['instrument_type'])
+    project_header = _determine_project_header(samplesheet, run['instrument_type'])
         
     has_correct_extension = lambda x: any([x.endswith(ext) for ext in fastq_extensions])
     run_fastq_dir_contents = os.listdir(run['fastq_directory'])
     run_fastq_files = set(filter(lambda x: all([has_correct_extension(x), os.path.isfile(os.path.join(run['fastq_directory'], x))]), run_fastq_dir_contents))
 
+    library_id_header = _determine_library_id_header(samplesheet, run['instrument_type'])
+    
     for item in samplesheet[libraries_section]:
         library = {}
-        library_id = item['sample_id']
+        library_id = item[library_id_header]
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
         library['library_id'] = library_id
         library['project_id'] = item[project_header]
