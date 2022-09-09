@@ -39,12 +39,20 @@ def _find_fastq_directory(run_dir_path, instrument_type):
             greatest_alignment_subdir = alignment_subdirs[0]
             fastq_directory = os.path.join(alignment_directory, greatest_alignment_subdir, "Fastq")
         else:
-            fastq_directory = os.path.join(run_dir_path, "Data", "Intensities", "BaseCalls")
+            data_intensities_basecalls_dir_path = os.path.join(run_dir_path, "Data", "Intensities", "BaseCalls")
+            if os.path.exists(data_intensities_basecalls_dir_path):
+                fastq_directory = data_intensities_basecalls_dir_path
+            else:
+                fastq_directory = None
 
     elif instrument_type == 'nextseq':
-        analysis_subdirs = list([subdir.name for subdir in os.scandir(os.path.join(run_dir_path, "Analysis"))])
-        greatest_analysis_subdir_num = sorted(analysis_subdirs)[0]
-        fastq_directory = os.path.join(run_dir_path, "Analysis", str(greatest_analysis_subdir_num), "Data", "fastq")
+        analysis_dir_path = os.path.join(run_dir_path, "Analysis")
+        if os.path.exists(analysis_dir_path):
+            analysis_subdirs = list([subdir.name for subdir in os.scandir(analysis_dir_path)])
+            greatest_analysis_subdir_num = sorted(analysis_subdirs, reverse=True)[0]
+            fastq_directory = os.path.join(run_dir_path, "Analysis", str(greatest_analysis_subdir_num), "Data", "fastq")
+        else:
+            fastq_directory = None
 
     return fastq_directory    
 
@@ -101,14 +109,14 @@ def find_runs(run_parent_dirs, fastq_extensions):
             if subdir.is_dir() and instrument_type != None:
                 samplesheet_paths = ss.find_samplesheets(subdir.path, instrument_type)
                 fastq_directory = _find_fastq_directory(subdir.path, instrument_type)
-                
-                runs[subdir.name] = {
-                    "run_id": subdir.name,
-                    "instrument_type": instrument_type,
-                    "samplesheet_files": samplesheet_paths,
-                    "run_directory": subdir.path,
-                    "fastq_directory": fastq_directory,
-                }
+                if fastq_directory != None:
+                    runs[subdir.name] = {
+                        "run_id": subdir.name,
+                        "instrument_type": instrument_type,
+                        "samplesheet_files": samplesheet_paths,
+                        "run_directory": subdir.path,
+                        "fastq_directory": fastq_directory,
+                    }
 
     for run_id, run in runs.items():
         samplesheet_to_parse = ss.choose_samplesheet_to_parse(run['samplesheet_files'], run['instrument_type'])

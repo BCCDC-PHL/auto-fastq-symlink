@@ -15,13 +15,14 @@ setup(
     install_requires=[
         "sqlalchemy==1.4.40",
         "alembic==1.8.0",
+        "jsonschema",
         "uvicorn",
         "fastapi",
     ],
-    description='',
-    url='',
-    author='',
-    author_email='',
+    description=' Automated symlinking of sequence data',
+    url='https://github.com/BCCDC-PHL/auto-fastq-symlink',
+    author='Dan Fornika',
+    author_email='dan.fornika@bccdc.ca',
     include_package_data=True,
     keywords=[],
     zip_safe=False
