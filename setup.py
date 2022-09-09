@@ -1,10 +1,10 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 
 setup(
     name='auto-fastq-symlink',
     version='0.1.0',
-    packages=find_packages(),
+    packages=find_namespace_packages(),
     entry_points={
         "console_scripts": [
             "auto-fastq-symlink = auto_fastq_symlink.__main__:main",
