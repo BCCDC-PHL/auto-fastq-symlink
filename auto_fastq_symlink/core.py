@@ -130,12 +130,12 @@ def _find_libraries(run, samplesheet, fastq_extensions):
         library['library_id'] = library_id
         library['project_id'] = item[project_header]
         r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R1_' + '.*', x), run_fastq_files))
-        if len(r1_fastq_filenames) == 1:
+        if len(r1_fastq_filenames) > 0:
             r1_fastq_filename = r1_fastq_filenames[0]
         else:
             r1_fastq_filename = None
         r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R2_' + '.*', x), run_fastq_files))
-        if len(r2_fastq_filenames) == 1:
+        if len(r2_fastq_filenames) > 0:
             r2_fastq_filename = r2_fastq_filenames[0]
         else:
             r2_fastq_filename = None
