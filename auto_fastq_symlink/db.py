@@ -70,7 +70,7 @@ def _update_libraries(session, run):
 
     for library in run['libraries']:
         existing_library = session.query(Library).filter(
-            SequencingRun.sequencing_run_id == run_id,
+            Library.sequencing_run_id == run_id,
             Library.library_id == library['library_id']).first()
 
         existing_library.library_id = library['library_id']
@@ -111,6 +111,8 @@ def _store_run(session, run):
 
 
 def _update_run(session, run):
+    """
+    """
     run_id = run['run_id']
     logging.debug(json.dumps({"event_type": "update_run_start", "run_id": run_id}))
     existing_run = session.query(SequencingRun).filter(SequencingRun.sequencing_run_id == run_id).first()
@@ -160,8 +162,10 @@ def store_symlinks(config, symlinks_by_project_id):
         for symlink in symlinks:
             path_target_tuple = (symlink['path'], symlink['target'])
             if path_target_tuple not in existing_symlink_path_target_tuples:
+                library_id = os.path.basename(symlink['target']).split('_')[0]
                 s = Symlink(
                     project_id = project_id,
+                    library_id = library_id,
                     path = symlink['path'],
                     target = symlink['target'],
                 )

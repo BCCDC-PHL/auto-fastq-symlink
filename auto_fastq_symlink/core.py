@@ -256,16 +256,18 @@ def scan(config):
     logging.debug(json.dumps({"event_type": "store_runs_complete"}))
 
     logging.debug(json.dumps({"event_type": "find_symlinks_start"}))
+    num_symlinks_found = 0
     symlinks_by_destination_dir = find_symlinks(config['projects'])
-    num_symlinks = len(symlinks_by_destination_dir)
-    logging.debug(json.dumps({"event_type": "find_symlinks_complete", "num_symlinks_found": num_symlinks}))
+    for destination_dir, symlinks in symlinks_by_destination_dir.items():
+        num_symlinks_found += len(symlinks)
+    logging.debug(json.dumps({"event_type": "find_symlinks_complete", "num_symlinks_found": num_symlinks_found}))
     logging.debug(json.dumps({"event_type": "store_symlinks_start"}))
     db.store_symlinks(config, symlinks_by_destination_dir)
     logging.debug(json.dumps({"event_type": "store_symlinks_complete"}))
     logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_start"}))
     db.delete_nonexistent_symlinks(config)
     logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_complete"}))
-    logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs, "num_symlinks_found": num_symlinks}))
+    logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs, "num_symlinks_found": num_symlinks_found}))
 
 
 def symlink(config):
