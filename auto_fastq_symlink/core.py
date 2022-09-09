@@ -95,7 +95,10 @@ def _determine_library_id_header(samplesheet, instrument_type):
     if instrument_type == 'miseq':
         sample_ids = [library['sample_id'] for library in samplesheet[libraries_section]]
         sample_names = [library['sample_name'] for library in samplesheet[libraries_section]]
-        if all([sample_id == "" for sample_id in sample_ids]) or all([re.match("S\d+", sample_id) for sample_id in sample_ids]):
+        all_sample_ids_blank = all([sample_id == "" for sample_id in sample_ids])
+        all_sample_ids_s_plus_digits = all([re.match("S\d+", sample_id) for sample_id in sample_ids])
+        all_sample_ids_only_digits = all([re.match("\d+", sample_id) for sample_id in sample_ids])
+        if all_sample_ids_blank or all_sample_ids_s_plus_digits or all_sample_ids_only_digits:
             library_id_header = 'sample_name'
         else:
             library_id_header = 'sample_id'
@@ -165,7 +168,7 @@ def find_runs(run_parent_dirs, fastq_extensions):
                 fastq_directory = _find_fastq_directory(subdir.path, instrument_type)
                 if fastq_directory != None:
                     logging.debug(json.dumps({"event_type": "sequencing_run_found", "sequencing_run_id": run_id}))
-                    runs[subdir.name] = {
+                    runs[run_id] = {
                         "run_id": run_id,
                         "instrument_type": instrument_type,
                         "samplesheet_files": samplesheet_paths,
@@ -202,6 +205,7 @@ def find_symlinks(projects):
                         path = dir_item.path
                         target = os.path.realpath(dir_item.path)
                         symlink = {
+                            "sequencing_run_id": os.path.basename(project_symlinks_by_run_dir),
                             "path": path,
                             "target": target,
                         }
@@ -226,21 +230,25 @@ def determine_symlinks_to_create(config):
     for project_id in config['projects']:
         symlinks_to_create_by_project_id[project_id] = []
         project_libraries = db.get_libraries_by_project_id(config, project_id)
+        project_excluded_runs = config['projects'][project_id]['excluded_runs']
+        project_excluded_libraries = config['projects'][project_id]['excluded_libraries']
+
         for library in project_libraries:
-            project_fastq_path_r1_pair = (library['project_id'], library['fastq_path_r1'])
-            if project_fastq_path_r1_pair not in existing_project_target_pairs:
-                fastq_path_r1 = {
-                    'project_id': library['project_id'],
-                    'sequencing_run_id': library['sequencing_run_id'],
-                    'target': library['fastq_path_r1'],
-                }
-                symlinks_to_create_by_project_id[project_id].append(fastq_path_r1)
-                fastq_path_r2 = {
-                    'project_id': library['project_id'],
-                    'sequencing_run_id': library['sequencing_run_id'],
-                    'target': library['fastq_path_r2'],
-                }
-                symlinks_to_create_by_project_id[project_id].append(fastq_path_r2)
+            if (library['sequencing_run_id'] not in project_excluded_runs) and (library['library_id'] not in project_excluded_libraries):
+                project_fastq_path_r1_pair = (library['project_id'], library['fastq_path_r1'])
+                if project_fastq_path_r1_pair not in existing_project_target_pairs:
+                    fastq_path_r1 = {
+                        'project_id': library['project_id'],
+                        'sequencing_run_id': library['sequencing_run_id'],
+                        'target': library['fastq_path_r1'],
+                    }
+                    symlinks_to_create_by_project_id[project_id].append(fastq_path_r1)
+                    fastq_path_r2 = {
+                        'project_id': library['project_id'],
+                        'sequencing_run_id': library['sequencing_run_id'],
+                        'target': library['fastq_path_r2'],
+                    }
+                    symlinks_to_create_by_project_id[project_id].append(fastq_path_r2)
 
     return symlinks_to_create_by_project_id
 

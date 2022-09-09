@@ -165,6 +165,7 @@ def store_symlinks(config, symlinks_by_project_id):
                 library_id = os.path.basename(symlink['target']).split('_')[0]
                 s = Symlink(
                     project_id = project_id,
+                    sequencing_run_id = symlink['sequencing_run_id'],
                     library_id = library_id,
                     path = symlink['path'],
                     target = symlink['target'],

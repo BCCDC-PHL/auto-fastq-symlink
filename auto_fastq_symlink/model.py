@@ -62,8 +62,9 @@ class Project(Base):
 class Symlink(Base):
     __tablename__ = 'symlink'
 
-    project_id = Column(Integer, ForeignKey("project.project_id"))
-    library_id = Column(Integer, ForeignKey("library.library_id"))
+    project_id = Column(String, ForeignKey("project.project_id"))
+    sequencing_run_id = Column(String, ForeignKey("sequencing_run.sequencing_run_id"))
+    library_id = Column(String, ForeignKey("library.library_id"))
     path = Column(String, primary_key=True)
     target = Column(String, primary_key=True)
     timestamp_updated = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
