@@ -129,8 +129,16 @@ def _find_libraries(run, samplesheet, fastq_extensions):
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
         library['library_id'] = library_id
         library['project_id'] = item[project_header]
-        r1_fastq_filename = list(filter(lambda x: re.match(library_id + '.*' + '_R1_' + '.*', x), run_fastq_files))[0]
-        r2_fastq_filename = list(filter(lambda x: re.match(library_id + '.*' + '_R2_' + '.*', x), run_fastq_files))[0]
+        r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R1_' + '.*', x), run_fastq_files))
+        if len(r1_fastq_filenames) == 1:
+            r1_fastq_filename = r1_fastq_filenames[0]
+        else:
+            r1_fastq_filename = None
+        r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R2_' + '.*', x), run_fastq_files))
+        if len(r2_fastq_filenames) == 1:
+            r2_fastq_filename = r2_fastq_filenames[0]
+        else:
+            r2_fastq_filename = None
         r1_fastq_path = os.path.join(run['fastq_directory'], r1_fastq_filename)
         r2_fastq_path = os.path.join(run['fastq_directory'], r2_fastq_filename)
         if os.path.exists(r1_fastq_path):
