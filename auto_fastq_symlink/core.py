@@ -107,7 +107,20 @@ def _determine_library_id_header(samplesheet, instrument_type):
     return library_id_header        
 
 
-def _find_libraries(run, samplesheet, fastq_extensions):
+def sanitize_library_id(library_id: str):
+    """
+    """
+    sanitized_library_id = library_id.strip()
+    sanitized_library_id = sanitized_library_id.replace('_', '-') # There shouldn't be underscores in library IDs, but if there are, they get swapped with '-' in fastq filenames.
+    sanitized_library_id = sanitized_library_id.replace(' ', '-') # There shouldn't be spaces in library IDs, but if there are, they get swapped with '-' in fastq filenames.
+    symbols = "\\`*{}[]()>#!$^"
+    for s in symbols:
+        sanitized_library_id = sanitized_library_id.replace(s, '-')
+    sanitized_library_id = re.sub('-+', '-', sanitized_library_id) #
+    return sanitized_library_id
+
+
+def find_libraries(run, samplesheet, fastq_extensions):
     """
     """
     libraries = []
@@ -125,12 +138,15 @@ def _find_libraries(run, samplesheet, fastq_extensions):
 
     library_id_header = _determine_library_id_header(samplesheet, run['instrument_type'])
     
+    found_library_ids = set()
     for item in samplesheet[libraries_section]:
         required_item_keys = [project_header, library_id_header]
         if not all([k in item for k in required_item_keys]):
             continue
         library = {}
-        library_id = item[library_id_header].strip().replace('_', '-') # There shouldn't be underscores in library IDs, but if there are, they get swapped with '-' in fastq filenames.
+        library_id = sanitize_library_id(item[library_id_header])
+        if library_id == "" or library_id in found_library_ids:
+            continue
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
         library['library_id'] = library_id
         library['project_id'] = item[project_header]
@@ -155,21 +171,23 @@ def _find_libraries(run, samplesheet, fastq_extensions):
             logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "fastq_path": r2_fastq_path}))
             library['fastq_path_r2'] = r2_fastq_path
         else:
-            library['fastq_path_r1'] = None
+            library['fastq_path_r2'] = None
+        found_library_ids.add(library_id)
         libraries.append(library)
 
     return libraries
     
 
-def find_runs(run_parent_dirs, fastq_extensions):
+def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]):
     """
     """
-    runs = {}
+    run = {}
     miseq_run_id_regex = "\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"
     nextseq_run_id_regex = "\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"
     for run_parent_dir in run_parent_dirs:
         subdirs = os.scandir(run_parent_dir)
         for subdir in subdirs:
+            run = {}
             instrument_type = None
             run_id = subdir.name
             if re.match(miseq_run_id_regex, run_id):
@@ -181,29 +199,27 @@ def find_runs(run_parent_dirs, fastq_extensions):
                 fastq_directory = _find_fastq_directory(subdir.path, instrument_type)
                 if fastq_directory != None:
                     logging.debug(json.dumps({"event_type": "sequencing_run_found", "sequencing_run_id": run_id}))
-                    runs[run_id] = {
+                    run = {
                         "run_id": run_id,
                         "instrument_type": instrument_type,
                         "samplesheet_files": samplesheet_paths,
                         "run_directory": subdir.path,
                         "fastq_directory": fastq_directory,
                     }
+                    samplesheet_to_parse = ss.choose_samplesheet_to_parse(run['samplesheet_files'], run['instrument_type'])
+                    if samplesheet_to_parse:
+                        logging.debug(json.dumps({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
+                    else:
+                        logging.error(json.dumps({"event_type": "samplesheet_not_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
+                        run['libraries'] = []
+                        continue
 
-    for run_id, run in runs.items():
-        samplesheet_to_parse = ss.choose_samplesheet_to_parse(run['samplesheet_files'], run['instrument_type'])
-        if samplesheet_to_parse:
-            logging.debug(json.dumps({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
-        else:
-            logging.error(json.dumps({"event_type": "samplesheet_not_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
-            run['libraries'] = []
-            continue
+                    run['parsed_samplesheet'] = samplesheet_to_parse
+                    samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
+                    libraries = find_libraries(run, samplesheet, fastq_extensions)
+                    run['libraries'] = libraries
 
-        run['parsed_samplesheet'] = samplesheet_to_parse
-        samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
-        libraries = _find_libraries(run, samplesheet, fastq_extensions)
-        run['libraries'] = libraries
-
-    return runs
+                    yield run
 
 
 def find_symlinks(projects):
@@ -214,7 +230,6 @@ def find_symlinks(projects):
         symlinks_by_project[project_id] = []
         fastq_symlinks_dir = project['fastq_symlinks_dir']
         if os.path.exists(fastq_symlinks_dir):
-            symlinks = []
             project_symlinks_by_run_dirs = os.scandir(fastq_symlinks_dir)
             for project_symlinks_by_run_dir in project_symlinks_by_run_dirs:
                 project_symlinks_by_run_dir_contents = os.scandir(project_symlinks_by_run_dir)
@@ -269,7 +284,7 @@ def determine_symlinks_to_create(config):
     return symlinks_to_create_by_project_id
 
 
-def create_symlinks(config, symlinks_to_create_by_project_id):
+def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id: dict[str, object]):
     """
     """
     symlinks_complete = {'num_symlinks_created': 0}
@@ -319,7 +334,7 @@ def create_symlinks(config, symlinks_to_create_by_project_id):
     return symlinks_complete
 
 
-def scan(config):
+def scan(config: dict[str, object]):
     """
     Scanning involves looking for all existing runs and storing them to the database,
     then looking for all existing symlinks and storing them to the database.
@@ -335,14 +350,12 @@ def scan(config):
     db.store_projects(config, projects)
     logging.debug(json.dumps({"event_type": "store_projects_complete"}))
 
-    logging.debug(json.dumps({"event_type": "find_runs_start"}))
-    runs = find_runs(config['run_parent_dirs'], config['fastq_extensions'])
-    num_runs = len(runs)
-    logging.debug(json.dumps({"event_type": "find_runs_complete", "num_runs_found": num_runs}))
-
-    logging.debug(json.dumps({"event_type": "store_runs_start"}))
-    db.store_runs(config, runs)
-    logging.debug(json.dumps({"event_type": "store_runs_complete"}))
+    logging.debug(json.dumps({"event_type": "find_and_store_runs_start"}))
+    num_runs_found = 0
+    for run in find_runs(config['run_parent_dirs'], config['fastq_extensions']):
+        db.store_run(config, run)
+        num_runs_found += 1
+    logging.debug(json.dumps({"event_type": "find_and_store_runs_complete", "num_runs_found": num_runs_found}))
 
     logging.debug(json.dumps({"event_type": "find_symlinks_start"}))
     num_symlinks_found = 0
@@ -350,13 +363,16 @@ def scan(config):
     for destination_dir, symlinks in symlinks_by_destination_dir.items():
         num_symlinks_found += len(symlinks)
     logging.debug(json.dumps({"event_type": "find_symlinks_complete", "num_symlinks_found": num_symlinks_found}))
+
     logging.debug(json.dumps({"event_type": "store_symlinks_start"}))
     db.store_symlinks(config, symlinks_by_destination_dir)
     logging.debug(json.dumps({"event_type": "store_symlinks_complete"}))
+
     logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_start"}))
     db.delete_nonexistent_symlinks(config)
     logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_complete"}))
-    logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs, "num_symlinks_found": num_symlinks_found}))
+
+    logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs_found, "num_symlinks_found": num_symlinks_found}))
 
 
 def symlink(config):

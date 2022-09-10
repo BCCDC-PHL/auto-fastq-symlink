@@ -4,7 +4,7 @@ import logging
 import os
 
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine
 
 import auto_fastq_symlink.util as util
 
@@ -32,13 +32,13 @@ def store_projects(config, projects):
             projects_to_store.append(p)
 
     for project in projects_to_store:
-        logging.debug("Storing project: " + project.project_id)
+        logging.debug(json.dumps({"event_type": "project_stored", "project_id": project.project_id}))
 
     session.add_all(projects_to_store)
     session.commit()
 
 
-def _store_libraries(session, run):
+def store_libraries(session: Session, run: dict[str, object]):
     """
     """
     run_id = run['run_id']
@@ -50,6 +50,14 @@ def _store_libraries(session, run):
         else:
             project_id = library['project_id']
 
+        logging.debug(json.dumps({
+            "event_type": "preparing_to_queue_library_for_storage",
+            "sequencing_run_id": run_id,
+            "library_id": library['library_id'],
+            "project_id": library['project_id'],
+            "fastq_path_r1": library['fastq_path_r1'],
+            "fastq_path_r2": library['fastq_path_r2'],
+        }))
         l = Library(
             library_id = library['library_id'],
             sequencing_run_id = run_id,
@@ -58,12 +66,21 @@ def _store_libraries(session, run):
             fastq_path_r2 = library['fastq_path_r2'],
         )
         libraries_to_store.append(l)
+        logging.debug(json.dumps({
+            "event_type": "queued_library_for_storage",
+            "sequencing_run_id": run_id,
+            "library_id": library['library_id'],
+            "project_id": library['project_id'],
+            "fastq_path_r1": library['fastq_path_r1'],
+            "fastq_path_r2": library['fastq_path_r2']
+        }))
 
     session.add_all(libraries_to_store)
     session.commit()
+    logging.debug(json.dumps({"event_type": "run_libraries_stored", "sequencing_run_id": run_id}))
 
 
-def _update_libraries(session, run):
+def update_libraries(session: Session, run: dict[str, object]):
     """
     """
     run_id = run['run_id']
@@ -73,18 +90,27 @@ def _update_libraries(session, run):
             Library.sequencing_run_id == run_id,
             Library.library_id == library['library_id']).first()
 
-        existing_library.library_id = library['library_id']
-        existing_library.project_id = library['project_id']
-        existing_library.fastq_path_r1 = library['fastq_path_r1']
-        existing_library.fastq_path_r2 = library['fastq_path_r2']
-
-        session.commit()
+        if existing_library:
+            existing_library.library_id = library['library_id']
+            existing_library.project_id = library['project_id']
+            existing_library.fastq_path_r1 = library['fastq_path_r1']
+            existing_library.fastq_path_r2 = library['fastq_path_r2']
+            session.commit()
+            logging.debug(json.dumps({"event_type": "library_updated", "sequencing_run_id": run_id, "library_id": library['library_id']}))
             
 
-def _store_run(session, run):
+def store_run(config: dict[str, object], run: dict[str, object]):
     """
     """
+
+    connection_uri = str(config['database_connection_uri'])
+    engine = create_engine(connection_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
     run_id = run['run_id']
+    existing_run = session.query(SequencingRun).filter(SequencingRun.sequencing_run_id == run_id).first()
+
     six_digit_date = run_id.split('_')[0]
     year = int("20" + six_digit_date[0:2])
     month = int(six_digit_date[2:4])
@@ -92,64 +118,32 @@ def _store_run(session, run):
     run_date = datetime.date(year, month, day)
 
     instrument_id = run_id.split('_')[1]
-            
-    r = SequencingRun(
-        sequencing_run_id = run_id,
-        run_date = run_date,
-        instrument_type = run['instrument_type'],
-        instrument_id = instrument_id,
-        samplesheet = run['parsed_samplesheet'],
-        run_directory = run['run_directory'],
-        fastq_directory = run['fastq_directory'],
-    )
 
-    logging.debug("Storing run: " + run_id)
-    session.add(r)
-    session.commit()
+    if existing_run:
+        existing_run.samplesheet = run['parsed_samplesheet']
+        existing_run.fastq_directory = run['fastq_directory']
+        session.commit()
+        logging.debug(json.dumps({"event_type": "run_updated", "run_id": run_id}))
+        update_libraries(session, run)
+    else:
+        r = SequencingRun(
+            sequencing_run_id = run_id,
+            run_date = run_date,
+            instrument_type = run['instrument_type'],
+            instrument_id = instrument_id,
+            samplesheet = run['parsed_samplesheet'],
+            run_directory = run['run_directory'],
+            fastq_directory = run['fastq_directory'],
+        )
+        session.add(r)
+        store_libraries(session, run)
+        logging.debug(json.dumps({"event_type": "run_stored", "run_id": run_id}))
 
-    _store_libraries(session, run)
 
-
-def _update_run(session, run):
+def store_symlinks(config: dict[str, object], symlinks_by_project_id: dict[str, object]):
     """
     """
-    run_id = run['run_id']
-    logging.debug(json.dumps({"event_type": "update_run_start", "run_id": run_id}))
-    existing_run = session.query(SequencingRun).filter(SequencingRun.sequencing_run_id == run_id).first()
-
-    existing_run.samplesheet = run['parsed_samplesheet']
-    existing_run.fastq_directory = run['fastq_directory']
-
-    session.commit()
-    logging.debug(json.dumps({"event_type": "update_run_complete", "run_id": run_id}))
-
-    _update_libraries(session, run)
-    
-
-
-def store_runs(config, runs):
-    """
-    """
-    connection_uri = config['database_connection_uri']
-    engine = create_engine(connection_uri)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
-    existing_sequencing_runs = session.query(SequencingRun).all()
-    existing_sequencing_run_ids = set([run.sequencing_run_id for run in existing_sequencing_runs])
-
-    for run_id, run in runs.items():
-        if run_id not in existing_sequencing_run_ids:
-            _store_run(session, run)
-        else:
-            _update_run(session, run)
-
-
-
-def store_symlinks(config, symlinks_by_project_id):
-    """
-    """
-    connection_uri = config['database_connection_uri']
+    connection_uri = str(config['database_connection_uri'])
     engine = create_engine(connection_uri)
     Session = sessionmaker(bind=engine)
     session = Session()
