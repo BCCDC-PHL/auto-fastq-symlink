@@ -302,13 +302,13 @@ def _parse_cloud_settings_section_nextseq_v1(samplesheet_path):
     for line in cloud_settings_lines:
         cloud_settings_key = util.camel_to_snake(line.split(',')[0])
 
-    if len(line.split(',')) > 1:
-        cloud_settings_value = line.split(',')[1]
-    else:
-        cloud_settings_value = ""
+        if len(line.split(',')) > 1:
+            cloud_settings_value = line.split(',')[1]
+        else:
+            cloud_settings_value = ""
 
-    if cloud_settings_key != "":
-        cloud_settings[cloud_settings_key] = cloud_settings_value
+        if cloud_settings_key != "":
+            cloud_settings[cloud_settings_key] = cloud_settings_value
               
     return cloud_settings
 

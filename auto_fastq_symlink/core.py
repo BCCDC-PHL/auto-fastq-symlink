@@ -3,9 +3,7 @@ import json
 import logging
 import os
 import re
-import time
 
-import auto_fastq_symlink.config
 import auto_fastq_symlink.samplesheet as ss
 import auto_fastq_symlink.db as db
 
@@ -94,7 +92,6 @@ def _determine_library_id_header(samplesheet, instrument_type):
     libraries_section = _determine_libraries_section(samplesheet, instrument_type)
     if instrument_type == 'miseq':
         sample_ids = [library['sample_id'] for library in samplesheet[libraries_section]]
-        sample_names = [library['sample_name'] for library in samplesheet[libraries_section]]
         all_sample_ids_blank = all([sample_id == "" for sample_id in sample_ids])
         all_sample_ids_s_plus_digits = all([re.match("S\d+", sample_id) for sample_id in sample_ids])
         all_sample_ids_only_digits = all([re.match("\d+", sample_id) for sample_id in sample_ids])
@@ -114,9 +111,14 @@ def _find_libraries(run, samplesheet, fastq_extensions):
     """
     """
     libraries = []
+    # If we can't confirm that the fastq directory exists, no sense continuing.
+    # Short-circuit and return an empty list.
+    if not run['fastq_directory'] or not os.path.exists(run['fastq_directory']):
+        logging.error(json.dumps({"event_type": "find_libraries_failed", "run_fastq_directory": run['fastq_directory']}))
+        return libraries
     libraries_section = _determine_libraries_section(samplesheet, run['instrument_type'])
     project_header = _determine_project_header(samplesheet, run['instrument_type'])
-        
+
     has_correct_extension = lambda x: any([x.endswith(ext) for ext in fastq_extensions])
     run_fastq_dir_contents = os.listdir(run['fastq_directory'])
     run_fastq_files = set(filter(lambda x: all([has_correct_extension(x), os.path.isfile(os.path.join(run['fastq_directory'], x))]), run_fastq_dir_contents))
@@ -124,6 +126,9 @@ def _find_libraries(run, samplesheet, fastq_extensions):
     library_id_header = _determine_library_id_header(samplesheet, run['instrument_type'])
     
     for item in samplesheet[libraries_section]:
+        required_item_keys = [project_header, library_id_header]
+        if not all([k in item for k in required_item_keys]):
+            continue
         library = {}
         library_id = item[library_id_header].strip().replace('_', '-') # There shouldn't be underscores in library IDs, but if there are, they get swapped with '-' in fastq filenames.
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id}))
@@ -139,14 +144,14 @@ def _find_libraries(run, samplesheet, fastq_extensions):
             r2_fastq_filename = r2_fastq_filenames[0]
         else:
             r2_fastq_filename = None
-        r1_fastq_path = os.path.join(run['fastq_directory'], r1_fastq_filename)
-        r2_fastq_path = os.path.join(run['fastq_directory'], r2_fastq_filename)
-        if os.path.exists(r1_fastq_path):
+        r1_fastq_path = os.path.join(run['fastq_directory'], r1_fastq_filename) if r1_fastq_filename else None
+        r2_fastq_path = os.path.join(run['fastq_directory'], r2_fastq_filename) if r2_fastq_filename else None
+        if r1_fastq_path and os.path.exists(r1_fastq_path):
             logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "fastq_path": r1_fastq_path}))
             library['fastq_path_r1'] = r1_fastq_path
         else:
             library['fastq_path_r1'] = None
-        if os.path.exists(r2_fastq_path):
+        if r2_fastq_path and os.path.exists(r2_fastq_path):
             logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "fastq_path": r2_fastq_path}))
             library['fastq_path_r2'] = r2_fastq_path
         else:
@@ -186,9 +191,14 @@ def find_runs(run_parent_dirs, fastq_extensions):
 
     for run_id, run in runs.items():
         samplesheet_to_parse = ss.choose_samplesheet_to_parse(run['samplesheet_files'], run['instrument_type'])
-        logging.debug(json.dumps({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
-        run['parsed_samplesheet'] = samplesheet_to_parse
+        if samplesheet_to_parse:
+            logging.debug(json.dumps({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
+        else:
+            logging.error(json.dumps({"event_type": "samplesheet_not_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
+            run['libraries'] = []
+            continue
 
+        run['parsed_samplesheet'] = samplesheet_to_parse
         samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
         libraries = _find_libraries(run, samplesheet, fastq_extensions)
         run['libraries'] = libraries
@@ -227,8 +237,6 @@ def determine_symlinks_to_create(config):
     """
     symlinks_to_create_by_project_id = {}
 
-    libraries_by_project_id = {}
-
     existing_symlinks = db.get_symlinks(config)
     existing_project_target_pairs = set()
     for symlink in existing_symlinks:
@@ -264,6 +272,7 @@ def determine_symlinks_to_create(config):
 def create_symlinks(config, symlinks_to_create_by_project_id):
     """
     """
+    symlinks_complete = {'num_symlinks_created': 0}
     for project_id, symlinks in symlinks_to_create_by_project_id.items():
         project_fastq_symlinks_dir = config['projects'][project_id]['fastq_symlinks_dir']
 
