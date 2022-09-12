@@ -339,6 +339,11 @@ def scan(config: dict[str, object]):
     Scanning involves looking for all existing runs and storing them to the database,
     then looking for all existing symlinks and storing them to the database.
     At the end of a scan, we should be able to determine which (if any) symlinks need to be created.
+
+    :param config: Application config.
+    :type config: dict[str, object]
+    :return: None
+    :rtype: NoneType
     """
     logging.info(json.dumps({"event_type": "scan_start"}))
     logging.debug(json.dumps({"event_type": "collect_projects_start"}))
@@ -375,10 +380,15 @@ def scan(config: dict[str, object]):
     logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs_found, "num_symlinks_found": num_symlinks_found}))
 
 
-def symlink(config):
+def symlink(config: dict[str, object]):
     """
     Determine which symlinks need to be created, based on the current state of the database.
     Then create all symlinks that need to be created.
+
+    :param config: Application config.
+    :type config: dict[str, object]
+    :return: None
+    :rtype: NoneType
     """
     logging.info(json.dumps({"event_type": "symlink_start"}))
     logging.debug(json.dumps({"event_type": "determine_symlinks_start"}))
