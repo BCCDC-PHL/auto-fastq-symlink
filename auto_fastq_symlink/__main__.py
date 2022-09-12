@@ -39,6 +39,9 @@ def main():
 
     while(True):
         try:
+            if quit_when_safe:
+                exit(0)
+
             if args.config:
                 logging.info(json.dumps({"event_type": "load_config_start", "config_file": os.path.abspath(args.config)}))
                 try:
@@ -51,11 +54,10 @@ def main():
                     logging.error(json.dumps({"event_type": "load_config_failed", "config_file": os.path.abspath(args.config)}))
 
             # All of the action happens here.
-            core.scan(config)
-            core.symlink(config)
-
-            if quit_when_safe:
-                exit(0)
+            for run in core.scan(config):
+                core.symlink_run(config, run)
+                if quit_when_safe:
+                    exit(0)            
 
             if "scan_interval_seconds" in config:
                 scan_interval = config['scan_interval_seconds']

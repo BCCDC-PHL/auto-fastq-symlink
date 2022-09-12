@@ -204,6 +204,24 @@ def get_symlinks(config):
     return existing_symlinks
 
 
+def get_symlinks_by_run_id(config, run_id):
+    """
+    """
+    connection_uri = config['database_connection_uri']
+    engine = create_engine(connection_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    query_result = session.query(Symlink).filter(Symlink.sequencing_run_id == run_id)
+
+    existing_symlinks_for_run = []
+    for row in query_result:
+        existing_symlinks_for_run.append(util.row2dict(row))
+        
+
+    return existing_symlinks_for_run
+
+
 def get_libraries(config):
     """
     """
@@ -230,6 +248,26 @@ def get_libraries_by_project_id(config, project_id):
     session = Session()
 
     query_result = session.query(Library).filter(Library.project_id == project_id)
+
+    project_libraries = []
+    for row in query_result:
+        project_libraries.append(util.row2dict(row))
+
+    return project_libraries
+
+
+def get_libraries_by_project_id_and_run_id(config, project_id, run_id):
+    """
+    """
+    connection_uri = config['database_connection_uri']
+    engine = create_engine(connection_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    query_result = session.query(Library).filter(
+        Library.project_id == project_id,
+        Library.sequencing_run_id == run_id,
+    )
 
     project_libraries = []
     for row in query_result:

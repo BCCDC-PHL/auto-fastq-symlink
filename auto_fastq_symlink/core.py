@@ -104,7 +104,7 @@ def _determine_library_id_header(samplesheet, instrument_type):
     else:
         library_id_header = None
 
-    return library_id_header        
+    return library_id_header
 
 
 def sanitize_library_id(library_id: str):
@@ -178,8 +178,17 @@ def find_libraries(run, samplesheet, fastq_extensions):
     return libraries
     
 
-def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]):
+def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]) -> dict[str, object]:
     """
+    Find all sequencing runs under all of the `run_parent_dirs` from the config.
+    Runs are found by matching sub-directory names against the following regexes: `"\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"` (MiSeq) and `"\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"` (NextSeq)
+
+    :param run_parent_dirs: List of parent directories to scan for sequencing runs.
+    :type run_parent_dirs: list[str]
+    :param fastq_extensions: List of valid fastq file extensions (eg: `[".fastq", ".fastq.gz", ".fq", ".fq.gz"]`)
+    :type fastq_extensions: list[str]
+    :return: Dictionary of sequencin run info, indexed by sequencing run ID.
+    :rtype: dict[str, object]
     """
     run = {}
     miseq_run_id_regex = "\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"
@@ -224,6 +233,12 @@ def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]):
 
 def find_symlinks(projects):
     """
+    Find all existing symlinks under each project's `fastq_symlinks_dir`
+
+    :param projects:
+    :type projects: dict[str, object]
+    :return: Dict of existing symlinks, indexed by project ID
+    :rtype: dict[str, object]
     """
     symlinks_by_project = {}
     for project_id, project in projects.items():
@@ -247,12 +262,18 @@ def find_symlinks(projects):
     return symlinks_by_project
 
 
-def determine_symlinks_to_create(config):
+def determine_symlinks_to_create_for_run(config, run_id):
     """
+    :param config: Application config
+    :type config: dict[str, object]
+    :param run_id: Sequencing run identifier
+    :type run_id: str
+    :return: Dictionary of symlinks to create, indexed by project ID
+    :rtype: dict[str, object]
     """
     symlinks_to_create_by_project_id = {}
 
-    existing_symlinks = db.get_symlinks(config)
+    existing_symlinks = db.get_symlinks_by_run_id(config, run_id)
     existing_project_target_pairs = set()
     for symlink in existing_symlinks:
         project_target_pair = (symlink['project_id'], symlink['target'])
@@ -260,7 +281,7 @@ def determine_symlinks_to_create(config):
 
     for project_id in config['projects']:
         symlinks_to_create_by_project_id[project_id] = []
-        project_libraries = db.get_libraries_by_project_id(config, project_id)
+        project_libraries = db.get_libraries_by_project_id_and_run_id(config, project_id, run_id)
         project_excluded_runs = config['projects'][project_id]['excluded_runs']
         project_excluded_libraries = config['projects'][project_id]['excluded_libraries']
 
@@ -286,12 +307,18 @@ def determine_symlinks_to_create(config):
 
 def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id: dict[str, object]):
     """
+    :param config:
+    :type config: dict[str, object]
+    :param symlinks_to_create_by_project_id:
+    :type symlinks_to_create_by_project_id: dict[str, object]
+    :return: Dictionary of symlinks created by project ID.
+    :rtype: dict[str, object]
     """
-    symlinks_complete = {'num_symlinks_created': 0}
+    symlinks_complete_by_project_id = {}
     for project_id, symlinks in symlinks_to_create_by_project_id.items():
         project_fastq_symlinks_dir = config['projects'][project_id]['fastq_symlinks_dir']
 
-        symlinks_complete = {'num_symlinks_created': 0}
+        symlinks_complete_by_project_id[project_id] = []
         for symlink in symlinks:
             symlink_parent_dir = os.path.join(project_fastq_symlinks_dir, symlink['sequencing_run_id'])
 
@@ -316,6 +343,7 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
             # dst = 'path' = the symlink
             try:
                 os.symlink(src=symlink['target'], dst=symlink['path'])
+                symlinks_complete_by_project_id[project_id].append({"target": symlink['target'], "path": symlink['path']})
             except FileExistsError as e:
                 logging.warning(json.dumps({
                     "event_type": "attempted_to_create_existing_symlink",
@@ -323,18 +351,18 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
                     "symlink_path": symlink['path'],
                 }))
 
-            symlinks_complete['num_symlinks_created'] += 1
-
+            project_symlinks_complete = {}
+            project_symlinks_complete['num_symlinks_created'] = len(symlinks_complete_by_project_id[project_id])
             timestamp = datetime.datetime.now().isoformat()
-            symlinks_complete['timestamp'] = timestamp
+            project_symlinks_complete['timestamp'] = timestamp
 
             with open(os.path.join(symlink_parent_dir, 'symlinks_complete.json'), 'w') as f:
-                f.write(json.dumps(symlinks_complete, indent=2) + '\n')
+                f.write(json.dumps(project_symlinks_complete, indent=2) + '\n')
                 
-    return symlinks_complete
+    return symlinks_complete_by_project_id
 
 
-def scan(config: dict[str, object]):
+def scan(config: dict[str, object]) -> dict[str, object]:
     """
     Scanning involves looking for all existing runs and storing them to the database,
     then looking for all existing symlinks and storing them to the database.
@@ -355,13 +383,6 @@ def scan(config: dict[str, object]):
     db.store_projects(config, projects)
     logging.debug(json.dumps({"event_type": "store_projects_complete"}))
 
-    logging.debug(json.dumps({"event_type": "find_and_store_runs_start"}))
-    num_runs_found = 0
-    for run in find_runs(config['run_parent_dirs'], config['fastq_extensions']):
-        db.store_run(config, run)
-        num_runs_found += 1
-    logging.debug(json.dumps({"event_type": "find_and_store_runs_complete", "num_runs_found": num_runs_found}))
-
     logging.debug(json.dumps({"event_type": "find_symlinks_start"}))
     num_symlinks_found = 0
     symlinks_by_destination_dir = find_symlinks(config['projects'])
@@ -377,30 +398,57 @@ def scan(config: dict[str, object]):
     db.delete_nonexistent_symlinks(config)
     logging.debug(json.dumps({"event_type": "delete_nonexistent_symlinks_complete"}))
 
+    logging.debug(json.dumps({"event_type": "find_and_store_runs_start"}))
+    num_runs_found = 0
+    for run in find_runs(config['run_parent_dirs'], config['fastq_extensions']):
+        db.store_run(config, run)
+        num_runs_found += 1
+        yield run
+
+    logging.debug(json.dumps({"event_type": "find_and_store_runs_complete", "num_runs_found": num_runs_found}))    
+
     logging.info(json.dumps({"event_type": "scan_complete", "num_runs_found": num_runs_found, "num_symlinks_found": num_symlinks_found}))
 
 
-def symlink(config: dict[str, object]):
+def symlink_run(config: dict[str, object], run: dict[str, object]):
     """
-    Determine which symlinks need to be created, based on the current state of the database.
+    Determine which symlinks need to be created for one run, based on the current state of the database.
     Then create all symlinks that need to be created.
 
     :param config: Application config.
     :type config: dict[str, object]
+    :param run: Sequencing run info.
+    :type config: dict[str, object]
     :return: None
     :rtype: NoneType
     """
-    logging.info(json.dumps({"event_type": "symlink_start"}))
-    logging.debug(json.dumps({"event_type": "determine_symlinks_start"}))
-    symlinks_to_create = determine_symlinks_to_create(config)
-    num_symlinks_to_create = 0
+    run_id = run['run_id']
+    logging.info(json.dumps({"event_type": "symlink_run_start", "sequencing_run_id": run_id}))
+    logging.debug(json.dumps({"event_type": "determine_symlinks_for_run_start", "sequencing_run_id": run_id}))
+
+    symlinks_to_create = determine_symlinks_to_create_for_run(config, run_id)
+    total_num_symlinks_to_create = 0
+    num_symlinks_to_create_by_project_id = {}
     for project_id, symlinks in symlinks_to_create.items():
-        num_symlinks_to_create += len(symlinks)
-    logging.debug(json.dumps({"event_type": "determine_symlinks_complete", "num_symlinks_to_create": num_symlinks_to_create}))
+        num_symlinks_to_create_by_project_id[project_id] = len(symlinks)
 
-    logging.debug(json.dumps({"event_type": "create_symlinks_start"}))
-    symlinks_complete = create_symlinks(config, symlinks_to_create)
-    num_symlinks_created = symlinks_complete['num_symlinks_created']
-    logging.debug(json.dumps({"event_type": "create_symlinks_complete"}))
-    logging.info(json.dumps({"event_type": "symlink_complete", "num_symlinks_created": num_symlinks_created}))
+    logging.debug(json.dumps({
+        "event_type": "determine_symlinks_for_run_complete",
+        "sequencing_run_id": run_id,
+        "total_num_symlinks_to_create": total_num_symlinks_to_create,
+        "num_symlinks_to_create_by_project_id": num_symlinks_to_create_by_project_id,
+    }))
 
+    logging.debug(json.dumps({"event_type": "create_symlinks_start", "sequencing_run_id": run_id}))
+    symlinks_complete_by_project_id = create_symlinks(config, symlinks_to_create)
+    total_num_symlinks_created = 0
+    for project_id, symlinks_complete in symlinks_complete_by_project_id.items():
+        total_num_symlinks_created += len(symlinks_complete)
+    logging.debug(json.dumps({"event_type": "create_symlinks_complete", "sequencing_run_id": run_id}))
+    num_symlinks_created_by_project_id = {project_id: len(symlinks) for project_id, symlinks in symlinks_complete_by_project_id.items()}
+    logging.info(json.dumps({
+        "event_type": "symlink_run_complete",
+        "sequencing_run_id": run_id,
+        "total_num_symlinks_created": total_num_symlinks_created,
+        "num_symlinks_created_by_project_id": num_symlinks_created_by_project_id,
+    }))
