@@ -142,7 +142,7 @@ def _parse_samplesheet_miseq_v1(samplesheet_path):
     try:
         jsonschema.validate(instance=samplesheet, schema=schema)
     except jsonschema.ValidationError as e:
-        logging.error("Validation failed on samplesheet: " + samplesheet_path)
+        logging.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
 
     return samplesheet
 
