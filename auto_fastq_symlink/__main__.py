@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import datetime
 import json
 import time
 import logging
@@ -24,7 +25,7 @@ def main():
         log_level = logging.INFO
 
     logging.basicConfig(
-        format='{"timestamp": "%(asctime)s.%(msecs)03d", "log_level": "%(levelname)s", "module", "%(module)s", "function_name": "%(funcName)s", "line_num", %(lineno)d, "message": %(message)s}',
+        format='{"timestamp": "%(asctime)s.%(msecs)03d", "level": "%(levelname)s", "module", "%(module)s", "function_name": "%(funcName)s", "line_num", %(lineno)d, "message": %(message)s}',
         datefmt='%Y-%m-%dT%H:%M:%S',
         encoding='utf-8',
         level=log_level,
@@ -34,14 +35,11 @@ def main():
     scan_interval = args.scan_interval
 
     # We'll trap any KeyboardInterrupt and toggle this to True,
-    # then exit at a safe time (in between scan & symlink passes).
+    # then exit at a safe time (in between runs or at the end of a scan of all runs)
     quit_when_safe = False
 
     while(True):
         try:
-            if quit_when_safe:
-                exit(0)
-
             if args.config:
                 logging.info(json.dumps({"event_type": "load_config_start", "config_file": os.path.abspath(args.config)}))
                 try:
@@ -54,10 +52,18 @@ def main():
                     logging.error(json.dumps({"event_type": "load_config_failed", "config_file": os.path.abspath(args.config)}))
 
             # All of the action happens here.
+            scan_start_timestamp = datetime.datetime.now()
             for run in core.scan(config):
                 core.symlink_run(config, run)
                 if quit_when_safe:
-                    exit(0)            
+                    exit(0)
+            scan_complete_timestamp = datetime.datetime.now()
+            scan_duration_delta = scan_complete_timestamp - scan_start_timestamp
+            scan_duration_seconds = scan_duration_delta.total_seconds()
+            logging.info(json.dumps({"event_type": "scan_complete", "scan_duration_seconds": scan_duration_seconds}))
+            
+            if quit_when_safe:
+                exit(0)
 
             if "scan_interval_seconds" in config:
                 scan_interval = config['scan_interval_seconds']

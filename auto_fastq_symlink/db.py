@@ -97,6 +97,17 @@ def update_libraries(session: Session, run: dict[str, object]):
             existing_library.fastq_path_r2 = library['fastq_path_r2']
             session.commit()
             logging.debug(json.dumps({"event_type": "library_updated", "sequencing_run_id": run_id, "library_id": library['library_id']}))
+        else:
+            l = Library(
+                library_id = library['library_id'],
+                sequencing_run_id = run_id,
+                project_id = library['project_id'],
+                fastq_path_r1 = library['fastq_path_r1'],
+                fastq_path_r2 = library['fastq_path_r2'],
+            )
+            session.add(l)
+            session.commit()
+            logging.debug(json.dumps({"event_type": "library_stored", "sequencing_run_id": run_id, "library_id": library['library_id']}))
             
 
 def store_run(config: dict[str, object], run: dict[str, object]):
