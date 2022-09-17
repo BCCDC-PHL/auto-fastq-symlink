@@ -370,8 +370,16 @@ def find_samplesheets(run_dir, instrument_type):
     return samplesheet_paths
 
 
-def choose_samplesheet_to_parse(samplesheet_paths, instrument_type):
+def choose_samplesheet_to_parse(samplesheet_paths: list[str], instrument_type: str, run_id: str):
     """
+    A run directory may have multiple SampleSheet.csv files in it. Choose only one to parse.
+
+    :param samplesheet_paths: List of paths to SampleSheet.csv files
+    :type samplesheet_paths: list[str]
+    :param instrument_type: Instrument type, should be one of: "miseq", "nextseq"
+    :type instrument_type: str
+    :param run_id: Sequencing run ID
+    :type run_id: str
     """
     samplesheet_to_parse = None
     if instrument_type == 'miseq':
@@ -394,8 +402,8 @@ def choose_samplesheet_to_parse(samplesheet_paths, instrument_type):
                 samplesheets_by_analysis_num[analysis_num] = samplesheet_path
         largest_analysis_num = 0
         for analysis_num, samplesheet_path in samplesheets_by_analysis_num.items():
-            if int(analysis_num) > largest_analysis_num:
-                largest_analysis_num = int(analysis_num)
+            if analysis_num > largest_analysis_num:
+                largest_analysis_num = analysis_num
         if largest_analysis_num > 0:
             samplesheet_to_parse = samplesheets_by_analysis_num[largest_analysis_num]
         if not samplesheet_to_parse:
@@ -405,7 +413,7 @@ def choose_samplesheet_to_parse(samplesheet_paths, instrument_type):
                 # If there isn't a top-level "SampleSheet.csv", and there are more than
                 # one SampleSheet, then we have no other way of deciding which is preferable.
                 pass
-        # print(json.dumps(samplesheets_by_analysis_num, indent=2))
+
 
     return samplesheet_to_parse
 
