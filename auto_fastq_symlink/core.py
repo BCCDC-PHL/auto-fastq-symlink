@@ -180,12 +180,12 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
         r1_fastq_path = os.path.join(run['fastq_directory'], r1_fastq_filename) if r1_fastq_filename else None
         r2_fastq_path = os.path.join(run['fastq_directory'], r2_fastq_filename) if r2_fastq_filename else None
         if r1_fastq_path and os.path.exists(r1_fastq_path):
-            logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_number": "R1", "fastq_path": r1_fastq_path}))
+            logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R1", "fastq_path": r1_fastq_path}))
             library['fastq_path_r1'] = r1_fastq_path
         else:
             library['fastq_path_r1'] = None
         if r2_fastq_path and os.path.exists(r2_fastq_path):
-            logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_number": "R2", "fastq_path": r2_fastq_path}))
+            logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R2", "fastq_path": r2_fastq_path}))
             library['fastq_path_r2'] = r2_fastq_path
         else:
             library['fastq_path_r2'] = None
