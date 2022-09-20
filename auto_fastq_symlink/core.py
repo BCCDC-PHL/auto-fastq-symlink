@@ -5,13 +5,13 @@ import os
 import re
 from typing import Iterable
 
-import auto_fastq_symlink
 import auto_fastq_symlink.samplesheet as ss
 import auto_fastq_symlink.db as db
 
 
 def collect_project_info(config: dict[str, object]) -> dict[str, str]:
     """
+    
     """
     projects = {}
     projects = config['projects']
