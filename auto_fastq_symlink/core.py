@@ -11,6 +11,7 @@ import auto_fastq_symlink.db as db
 
 def collect_project_info(config: dict[str, object]) -> dict[str, str]:
     """
+    
     """
     projects = {}
     projects = config['projects']
@@ -166,7 +167,7 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
             continue
         library['library_id'] = library_id
         library['project_id'] = project_id
-        logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id, "project_id": project_id}))
+        logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id}))
         r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R1_' + '.*', x), run_fastq_files))
         if len(r1_fastq_filenames) > 0:
             r1_fastq_filename = r1_fastq_filenames[0]
@@ -191,26 +192,26 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
             library['fastq_path_r2'] = None
         found_library_ids.add(library_id)
         libraries.append(library)
-        
+
 
     return libraries
     
 
-def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]) -> Iterable[dict[str, object]]:
+def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
     """
     Find all sequencing runs under all of the `run_parent_dirs` from the config.
     Runs are found by matching sub-directory names against the following regexes: `"\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"` (MiSeq) and `"\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"` (NextSeq)
 
-    :param run_parent_dirs: List of parent directories to scan for sequencing runs.
-    :type run_parent_dirs: list[str]
-    :param fastq_extensions: List of valid fastq file extensions (eg: `[".fastq", ".fastq.gz", ".fq", ".fq.gz"]`)
-    :type fastq_extensions: list[str]
+    :param config: Application config.
+    :type config: dict[str, object]
     :return: Dictionary of sequencin run info, indexed by sequencing run ID.
     :rtype: Iterable[dict[str, object]]
     """
     run = {}
     miseq_run_id_regex = "\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"
     nextseq_run_id_regex = "\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"
+    run_parent_dirs = config['run_parent_dirs']
+    fastq_extensions = config['fastq_extensions']
     for run_parent_dir in run_parent_dirs:
         subdirs = os.scandir(run_parent_dir)
         for subdir in subdirs:
@@ -222,6 +223,7 @@ def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]) -> Iterab
             elif re.match(nextseq_run_id_regex, run_id):
                 instrument_type = "nextseq"
             if subdir.is_dir() and instrument_type != None and os.path.exists(os.path.join(subdir.path, "upload_complete.json")):
+                logging.info(json.dumps({"event_type": "scan_run_start", "sequencing_run_id": run_id}))
                 samplesheet_paths = ss.find_samplesheets(subdir.path, instrument_type)
                 fastq_directory = _find_fastq_directory(subdir.path, instrument_type)
                 if fastq_directory != None:
@@ -244,6 +246,13 @@ def find_runs(run_parent_dirs: list[str], fastq_extensions: list[str]) -> Iterab
                     run['parsed_samplesheet'] = samplesheet_to_parse
                     samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
                     libraries = find_libraries(run, samplesheet, fastq_extensions)
+                    for library in libraries:
+                        if library['project_id'] in config['project_id_translation']:
+                            samplesheet_project_id = library['project_id']
+                            symlinking_project_id = config['project_id_translation'][samplesheet_project_id]
+                            library['project_id'] = symlinking_project_id
+                        elif library['project_id'] == '':
+                            library['project_id'] = None
                     run['libraries'] = libraries
 
                     yield run
@@ -276,7 +285,7 @@ def find_symlinks(projects):
                             "target": target,
                         }
                         symlinks_by_project[project_id].append(symlink)
-            
+
     return symlinks_by_project
 
 
@@ -332,6 +341,7 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run_id: str)
         "num_symlinks_to_create_by_project_id": num_symlinks_to_create_by_project_id,
     }))
 
+
     return symlinks_to_create_by_project_id
 
 
@@ -347,7 +357,6 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
     :rtype: dict[str, list[dict[str, str]]]
     """
     logging.debug(json.dumps({"event_type": "create_symlinks_start", "sequencing_run_id": run_id}))
-
     symlinks_complete_by_project_id = {}
     for project_id, symlinks in symlinks_to_create_by_project_id.items():
         project_fastq_symlinks_dir = config['projects'][project_id]['fastq_symlinks_dir']
@@ -435,7 +444,7 @@ def scan(config: dict[str, object]) -> Iterable[dict[str, object]]:
 
     logging.debug(json.dumps({"event_type": "find_and_store_runs_start"}))
     num_runs_found = 0
-    for run in find_runs(config['run_parent_dirs'], config['fastq_extensions']):
+    for run in find_runs(config):
         db.store_run(config, run)
         num_runs_found += 1
         yield run
@@ -459,7 +468,6 @@ def symlink_run(config: dict[str, object], run: dict[str, object]):
     logging.debug(json.dumps({"event_type": "symlink_run_start", "sequencing_run_id": run_id}))
 
     symlinks_to_create = determine_symlinks_to_create_for_run(config, run_id)
-
     symlinks_complete_by_project_id = create_symlinks(config, symlinks_to_create, run_id)
     total_num_symlinks_created = 0
     for project_id, symlinks_complete in symlinks_complete_by_project_id.items():

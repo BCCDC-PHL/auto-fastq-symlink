@@ -48,6 +48,28 @@ def parse_projects_definition_file(projects_definition_file_path: str) -> dict[s
     return projects
 
 
+def parse_project_id_translation_file(project_id_translation_file_path, projects):
+    """
+    :param project_id_translation_file_path:
+    :type project_id_translation_file_path: str
+    :param projects:
+    :type projects: dict[str, object]
+    :return: 
+    :rtype: dict[str, str]
+    """
+
+    project_translation = {}
+    with open(project_id_translation_file_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            samplesheet_project_id = row['samplesheet_project_id']
+            symlinking_project_id = row['symlinking_project_id']
+            if symlinking_project_id in projects:
+                project_translation[samplesheet_project_id] = symlinking_project_id
+
+    return project_translation
+
+
 def load_config(config_path: str) -> dict[str, object]:
     """
     :param config_path: Path to application config file (json format)
@@ -62,6 +84,12 @@ def load_config(config_path: str) -> dict[str, object]:
     if 'projects_definition_file' in config:
         projects = parse_projects_definition_file(config['projects_definition_file'])
         config['projects'] = projects
+        if 'project_id_translation_file' in config:
+            project_id_translation = parse_project_id_translation_file(config['project_id_translation_file'], config['projects'])
+            config['project_id_translation'] = project_id_translation
+        else:
+            config['project_id_translation'] = {}
+            
         for project_id, project in projects.items():
             if 'excluded_runs_list' in project:
                 try:
@@ -90,7 +118,7 @@ def load_config(config_path: str) -> dict[str, object]:
                 config['projects'][project_id]['excluded_libraries'] = excluded_libraries
             else:
                 config['projects'][project_id]['excluded_libraries'] = set()
-        
+
     return config
 
 

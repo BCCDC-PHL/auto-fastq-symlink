@@ -440,8 +440,12 @@ def parse_samplesheet_nextseq(samplesheet_path):
     return samplesheet
 
 
-def parse_samplesheet(samplesheet_path, instrument_type):
+def parse_samplesheet(samplesheet_path: str, instrument_type: str) -> dict[str, object]:
     """
+    :param samplesheet_path:
+    :type samplesheet_path: str
+    :param instrument_type: One of `miseq` or `nextseq`
+    :type instrument_type: str
     """
     samplesheet = None
     if instrument_type == 'miseq':
