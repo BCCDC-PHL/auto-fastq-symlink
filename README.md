@@ -56,6 +56,46 @@ sample-238
 
 If the value for the `simplify_symlink_filenames` field is set to `True` (or one of these: `true`, `T`, `t` or `1`), then the symlinks will be renamed to include only the library ID, followed by `_R1.fastq.gz` or `_R2.fastq.gz`. This feature is useful when symlinking to the illumina fastq files that the sequencers produce, which include additional run-specific tags in the filename (like: `mylibrary_S23_L001_R1_001.fastq.gz`, etc.). If the `simplify_symlink_filenames` field is set to `False` (or one of these: `false`, `F`, `f` or `0`), then the filenames of the symlinks will match the filenames of the target files.
 
+### Project ID Translation
+
+It may be the case that we don't want to use the exact project IDs that were provided in the SampleSheet files, or we want to translate a set of SampleSheet project IDs into a single project for symlinking.
+If that is the case, an optional config entry can be added under the key `"project_id_translation_file"`, as shown below.
+
+```json
+{
+    "run_parent_dirs": [
+        "/path/to/sequencers/M00123/runs",
+        "/path/to/sequencers/M00456/runs",
+        "/path/to/sequencers/VH00123/runs"
+    ],
+    "projects_definition_file": "/path/to/projects.csv",
+    "project_id_translation_file": "/path/to/project_id_translation.csv",
+    "scan_interval_seconds": 2,
+    "database_connection_uri": "sqlite:///symlinks.db",
+    "fastq_extensions": [
+        ".fastq",
+        ".fastq.gz",
+        ".fq",
+        ".fq.gz"
+    ]
+}
+```
+The `project_id_translation.csv` file should be a csv-formatted file with the headers:
+
+- `samplesheet_project_id`
+- `symlinking_project_id`
+
+For example, the following file will translate both `14` and `r_and_d` into `research_and_development`. It will translate `28` into `outbreak_investigation`.
+
+```csv
+samplesheet_project_id,symlinking_project_id
+14,research_and_development
+r_and_d,research_and_development
+28,outbreak_investigation
+```
+
+**Note:** The `symlinking_project_id` should appear in the `project_id` field of the `projects_definition_file`.
+
 ## Application Flowchart
 
 The application cycles between two phases:

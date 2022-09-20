@@ -194,10 +194,11 @@ def delete_nonexistent_symlinks(config):
     for symlink in existing_symlinks:
         if not os.path.exists(symlink.path):
             session.delete(symlink)
-            session.commit()
+
+    session.commit()
     
 
-def get_symlinks(config):
+def get_symlinks(config: dict[str, object]) -> list[dict[str, object]]:
     """
     """
     connection_uri = config['database_connection_uri']
