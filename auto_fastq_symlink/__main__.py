@@ -10,6 +10,7 @@ import os
 import auto_fastq_symlink.config
 import auto_fastq_symlink.core as core
 
+DEFAULT_SCAN_INTERVAL_SECONDS = 3600.0
 
 def main():
     parser = argparse.ArgumentParser()
@@ -54,7 +55,8 @@ def main():
             # All of the action happens here.
             scan_start_timestamp = datetime.datetime.now()
             for run in core.scan(config):
-                core.symlink_run(config, run)
+                if run is not None:
+                    core.symlink_run(config, run)
                 if quit_when_safe:
                     exit(0)
             scan_complete_timestamp = datetime.datetime.now()
@@ -66,7 +68,10 @@ def main():
                 exit(0)
 
             if "scan_interval_seconds" in config:
-                scan_interval = config['scan_interval_seconds']
+                try:
+                    scan_interval = float(str(config['scan_interval_seconds']))
+                except ValueError as e:
+                    scan_interval = DEFAULT_SCAN_INTERVAL_SECONDS
             time.sleep(scan_interval)
         except KeyboardInterrupt as e:
             logging.info(json.dumps({"event_type": "quit_when_safe_enabled"}))

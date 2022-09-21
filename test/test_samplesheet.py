@@ -1,7 +1,11 @@
 import os
+import jsonschema
+import logging
 import unittest
 
 import auto_fastq_symlink.samplesheet as ss
+
+logging.disable(logging.CRITICAL)
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -30,6 +34,11 @@ class Test(unittest.TestCase):
 
         self.assertTrue(all(has_project_id))
 
+    def test_parse_samplesheet_miseq_invalid_01_throws(self):
+        samplesheet_path = os.path.join(THIS_DIR, "data", "samplesheets", "SampleSheet_miseq_v1_invalid_01.csv")
+
+        self.assertRaises(jsonschema.ValidationError, ss.parse_samplesheet_miseq, samplesheet_path)
+
     def test_parse_samplesheet_nextseq_valid_01_correct_num_samples(self):
        samplesheet_path = os.path.join(THIS_DIR, "data", "samplesheets", "SampleSheet_nextseq_v1_valid_01.csv")
        samplesheet = ss.parse_samplesheet_nextseq(samplesheet_path)
@@ -52,6 +61,11 @@ class Test(unittest.TestCase):
         has_project_id = ['project_name' in library for library in libraries]
 
         self.assertTrue(all(has_project_id))
+
+    def test_parse_samplesheet_nextseq_invalid_01_throws(self):
+        samplesheet_path = os.path.join(THIS_DIR, "data", "samplesheets", "SampleSheet_nextseq_v1_invalid_01.csv")
+
+        self.assertRaises(jsonschema.ValidationError, ss.parse_samplesheet_nextseq, samplesheet_path)
 
 if __name__ == '__main__':
     unittest.main()

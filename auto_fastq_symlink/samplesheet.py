@@ -126,8 +126,13 @@ def _determine_samplesheet_version(samplesheet_path, instrument_type):
     return samplesheet_version
 
 
-def _parse_samplesheet_miseq_v1(samplesheet_path):
+def _parse_samplesheet_miseq_v1(samplesheet_path: str) -> dict[str, object]:
     """
+    :param samplesheet_path: Path to SampleSheet to be parsed
+    :type samplesheet_path: str
+    :return: The parsed SampleSheet
+    :rtype: dict[str, object]
+    :raises jsonschema.ValidationError: If the parsed samplesheed doesn't conform to the schema.
     """
     samplesheet = {}
     samplesheet['header'] = _parse_header_section_miseq_v1(samplesheet_path)
@@ -143,6 +148,7 @@ def _parse_samplesheet_miseq_v1(samplesheet_path):
         jsonschema.validate(instance=samplesheet, schema=schema)
     except jsonschema.ValidationError as e:
         logging.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
+        raise e
 
     return samplesheet
 
@@ -353,6 +359,17 @@ def _parse_samplesheet_nextseq_v1(samplesheet_path):
     samplesheet['bclconvert_data'] = _parse_bclconvert_data_section_nextseq_v1(samplesheet_path)
     samplesheet['cloud_settings'] = _parse_cloud_settings_section_nextseq_v1(samplesheet_path)
     samplesheet['cloud_data'] = _parse_cloud_data_section_nextseq_v1(samplesheet_path)
+
+    schema_path = os.path.join(os.path.dirname(__file__), "resources", "samplesheet_nextseq_v1.schema.json")
+    schema = None
+    with open(schema_path, 'r') as f:
+        schema = json.load(f)
+
+    try:
+        jsonschema.validate(instance=samplesheet, schema=schema)
+    except jsonschema.ValidationError as e:
+        logging.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
+        raise e
 
     return samplesheet
 
