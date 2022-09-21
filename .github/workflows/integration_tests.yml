@@ -18,10 +18,10 @@ jobs:
       run: |
         mkdir -p artifacts
     - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '11'
     - name: Download Run Simulator
       run: |
         wget https://github.com/dfornika/illumina-run-simulator/releases/download/v0.1.0/illumina-run-simulator-0.1.0-standalone.jar -O illumina-run-simulator.jar
