@@ -1,0 +1,14 @@
+{
+    "run_parent_dirs": [
+        "test/data/simulated_runs"
+    ],
+    "projects_definition_file": "test/data/config/projects_valid_01.csv",
+    "scan_interval_seconds": 3600,
+    "database_connection_uri": "sqlite:///symlinks.db",
+    "fastq_extensions": [
+        ".fastq",
+        ".fastq.gz",
+        ".fq",
+        ".fq.gz"
+    ]
+}
