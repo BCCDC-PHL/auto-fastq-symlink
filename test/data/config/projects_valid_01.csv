@@ -1,0 +1,2 @@
+project_id,fastq_symlinks_dir,excluded_runs_list,excluded_libraries_list,simplify_symlink_filenames
+routine_testing,test_output/routine_testing/fastq_symlinks_by_run,test/data/config/routine_testing_excluded_runs_empty.csv,test/data/config/routine_testing_excluded_libraries_empty.csv,True
