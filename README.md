@@ -1,3 +1,5 @@
+[![Unit Tests](https://github.com/BCCDC-PHL/auto-fastq-symlink/actions/workflows/unit_tests.yml/badge.svg?branch=main)](https://github.com/BCCDC-PHL/auto-fastq-symlink/actions/workflows/unit_tests.yml)
+
 # auto-fastq-symlink
 Automated symlinking of illumina fastq files, organized by project.
 
