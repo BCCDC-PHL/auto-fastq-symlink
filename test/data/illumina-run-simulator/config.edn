@@ -1,0 +1,24 @@
+{:instruments [{:instrument-id "M00123"
+                :output-dir "artifacts/simulated_runs/M00123/22"
+                :output-dir-structure :old
+                :instrument-type :miseq
+                :starting-run-number 300}
+               {:instrument-id "M00456"
+                :output-dir "artifacts/simulated_runs/M00456/22"
+                :output-dir-structure :new
+                :instrument-type :miseq
+                :starting-run-number 256}
+               {:instrument-id "VH00123"
+                :output-dir "artifacts/simulated_runs/VH00123/22"
+                :instrument-type :nextseq
+                :starting-run-number 12}]
+ :projects ["mysterious_experiment"
+            "routine_testing"
+            "quality_check"
+            "viral_outbreak"
+            "assay_development"
+            "42"]
+ :starting-plate-number 100
+ :starting-date "2022-06-01"
+ :run-interval-ms 100
+ :mark-upload-complete true}
