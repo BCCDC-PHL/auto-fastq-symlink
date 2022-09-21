@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-from typing import Iterable
+from typing import Iterable, Optional
 
 import auto_fastq_symlink.samplesheet as ss
 import auto_fastq_symlink.db as db
@@ -197,7 +197,7 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     return libraries
     
 
-def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
+def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]]:
     """
     Find all sequencing runs under all of the `run_parent_dirs` from the config.
     Runs are found by matching sub-directory names against the following regexes: `"\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"` (MiSeq) and `"\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"` (NextSeq)
@@ -244,7 +244,10 @@ def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
                         continue
 
                     run['parsed_samplesheet'] = samplesheet_to_parse
-                    samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
+                    try:
+                        samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
+                    except jsonschema.ValidationError as e:
+                        yield None
                     libraries = find_libraries(run, samplesheet, fastq_extensions)
                     for library in libraries:
                         if library['project_id'] in config['project_id_translation']:
@@ -406,7 +409,7 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
     return symlinks_complete_by_project_id
 
 
-def scan(config: dict[str, object]) -> Iterable[dict[str, object]]:
+def scan(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]]:
     """
     Scanning involves looking for all existing runs and storing them to the database,
     then looking for all existing symlinks and storing them to the database.
@@ -445,8 +448,9 @@ def scan(config: dict[str, object]) -> Iterable[dict[str, object]]:
     logging.debug(json.dumps({"event_type": "find_and_store_runs_start"}))
     num_runs_found = 0
     for run in find_runs(config):
-        db.store_run(config, run)
-        num_runs_found += 1
+        if run is not None:
+            db.store_run(config, run)
+            num_runs_found += 1
         yield run
 
     logging.info(json.dumps({"event_type": "find_and_store_runs_complete", "num_runs_found": num_runs_found}))

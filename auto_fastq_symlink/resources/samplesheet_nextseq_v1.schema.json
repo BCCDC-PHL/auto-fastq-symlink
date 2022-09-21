@@ -1,0 +1,23 @@
+{
+    "type": "object",
+    "properties": {
+        "cloud_data": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/cloud_data_element" }
+        }
+    },
+    "$defs": {
+        "cloud_data_element": {
+            "type": "object",
+            "required": ["sample_id", "project_name"],
+            "properties": {
+                "sample_id": {
+                    "type": "string"
+                },
+                "project_name": {
+                    "type": "string"
+                }
+            }
+        }
+    }       
+}
