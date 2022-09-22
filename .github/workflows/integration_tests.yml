@@ -25,6 +25,9 @@ jobs:
     - name: Download Run Simulator
       run: |
         wget https://github.com/dfornika/illumina-run-simulator/releases/download/v0.1.0/illumina-run-simulator-0.1.0-standalone.jar -O illumina-run-simulator.jar
+    - name: Create simulated run output directories
+      run: |
+        mkdir -p artifacts/simulated_runs/{M00123,M00456,VH00123}/22
     - name: Run Run Simulator
       run: |
         timeout 5 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/illumina-run-simulator.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
