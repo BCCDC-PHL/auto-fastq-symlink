@@ -30,7 +30,7 @@ jobs:
         mkdir -p artifacts/simulated_runs/{M00123,M00456,VH00123}/22
     - name: Run Run Simulator
       run: |
-        timeout 5 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/illumina-run-simulator.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 10 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/illumina-run-simulator.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
@@ -46,7 +46,7 @@ jobs:
         alembic upgrade head
     - name: Run Auto Symlinker
       run: |
-        timeout 10 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 12 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
     - name: Copy db to Artifacts
       run: |
         cp symlinks.db artifacts
