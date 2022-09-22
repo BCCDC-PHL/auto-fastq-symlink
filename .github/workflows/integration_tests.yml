@@ -43,7 +43,7 @@ jobs:
         alembic upgrade head
     - name: Run Auto Symlinker
       run: |
-        timeout 10 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 10 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
     - name: Copy db to Artifacts
       run: |
         cp symlinks.db artifacts
