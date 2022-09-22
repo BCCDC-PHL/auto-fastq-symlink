@@ -18,16 +18,19 @@ jobs:
       run: |
         mkdir -p artifacts
     - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '11'
     - name: Download Run Simulator
       run: |
         wget https://github.com/dfornika/illumina-run-simulator/releases/download/v0.1.0/illumina-run-simulator-0.1.0-standalone.jar -O illumina-run-simulator.jar
+    - name: Create simulated run output directories
+      run: |
+        mkdir -p artifacts/simulated_runs/{M00123,M00456,VH00123}/22
     - name: Run Run Simulator
       run: |
-        timeout 10 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/illumina-run-simulator.log.jsonl)
+        timeout 10 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/illumina-run-simulator.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
@@ -41,12 +44,16 @@ jobs:
         mkdir alembic/versions
         alembic revision --autogenerate -m 'init'
         alembic upgrade head
+    - name: Create symlink output directories
+      run: |
+        mkdir -p test_output/symlinks_by_project
     - name: Run Auto Symlinker
       run: |
-        timeout 30 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(artifacts/auto-fastq-symlink.log.jsonl)
+        timeout 15 auto-fastq-symlink --config test/data/config/integration_testing/config.json --log-level debug 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+    - name: Copy db to Artifacts
+      run: |
+        cp symlinks.db artifacts
     - uses: actions/upload-artifact@v1
       with:
         name: Artifacts
         path: artifacts
-
-    
