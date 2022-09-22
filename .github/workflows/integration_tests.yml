@@ -46,7 +46,7 @@ jobs:
         alembic upgrade head
     - name: Create symlink output directories
       run: |
-        mkdir -p artifacts/symlinks_by_project
+        mkdir -p test_output/symlinks_by_project
     - name: Run Auto Symlinker
       run: |
         timeout 15 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
@@ -57,5 +57,3 @@ jobs:
       with:
         name: Artifacts
         path: artifacts
-
-    
