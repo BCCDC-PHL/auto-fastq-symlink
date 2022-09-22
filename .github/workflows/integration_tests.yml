@@ -44,9 +44,12 @@ jobs:
         mkdir alembic/versions
         alembic revision --autogenerate -m 'init'
         alembic upgrade head
+    - name: Create symlink output directories
+      run: |
+        mkdir -p artifacts/symlinks_by_project
     - name: Run Auto Symlinker
       run: |
-        timeout 12 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 15 auto-fastq-symlink --config test/data/config/integration_testing/config.json 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
     - name: Copy db to Artifacts
       run: |
         cp symlinks.db artifacts
