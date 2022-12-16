@@ -5,6 +5,8 @@ import os
 import re
 from typing import Iterable, Optional
 
+import jsonschema
+
 import auto_fastq_symlink.samplesheet as ss
 import auto_fastq_symlink.db as db
 
