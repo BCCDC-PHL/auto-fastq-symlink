@@ -368,6 +368,11 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
 
         symlinks_complete_by_project_id[project_id] = []
         for symlink in symlinks:
+            # Defend against cases where symlink target is None
+            # See https://github.com/BCCDC-PHL/auto-fastq-symlink/issues/18
+            if symlink['target'] is None:
+                continue
+
             symlink_parent_dir = os.path.join(project_fastq_symlinks_dir, symlink['sequencing_run_id'])
 
             if not os.path.exists(symlink_parent_dir):
