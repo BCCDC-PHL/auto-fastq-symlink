@@ -252,6 +252,9 @@ def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]
     run_parent_dirs = config['run_parent_dirs']
     fastq_extensions = config['fastq_extensions']
     for run_parent_dir in run_parent_dirs:
+        if not os.path.exists(run_parent_dir):
+            logging.warning(json.dumps({"event_type": "run_parent_dir_does_not_exist", "run_parent_dir": run_parent_dir}))
+            continue
         subdirs = os.scandir(run_parent_dir)
         for subdir in subdirs:
             run = {}
