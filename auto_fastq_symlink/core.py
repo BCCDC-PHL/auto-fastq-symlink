@@ -317,19 +317,19 @@ def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]
                     run['parsed_samplesheet'] = samplesheet_to_parse
                     try:
                         samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
+                        libraries = find_libraries(run, samplesheet, fastq_extensions)
+                        for library in libraries:
+                            if library['project_id'] in config['project_id_translation']:
+                                samplesheet_project_id = library['project_id']
+                                symlinking_project_id = config['project_id_translation'][samplesheet_project_id]
+                                library['project_id'] = symlinking_project_id
+                            elif library['project_id'] == '':
+                                library['project_id'] = None
+                        run['libraries'] = libraries
+                        yield run
                     except jsonschema.ValidationError as e:
                         yield None
-                    libraries = find_libraries(run, samplesheet, fastq_extensions)
-                    for library in libraries:
-                        if library['project_id'] in config['project_id_translation']:
-                            samplesheet_project_id = library['project_id']
-                            symlinking_project_id = config['project_id_translation'][samplesheet_project_id]
-                            library['project_id'] = symlinking_project_id
-                        elif library['project_id'] == '':
-                            library['project_id'] = None
-                    run['libraries'] = libraries
-
-                    yield run
+                    
 
 
 def find_symlinks(projects):
