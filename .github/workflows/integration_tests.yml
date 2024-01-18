@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v1
     - name: Create artifacts directory
       run: |
-        mkdir -p artifacts
+        mkdir -p artifacts/artifacts
     - name: Setup Java
       uses: actions/setup-java@v3
       with:
@@ -27,10 +27,11 @@ jobs:
         wget https://github.com/dfornika/illumina-run-simulator/releases/download/v0.1.0/illumina-run-simulator-0.1.0-standalone.jar -O illumina-run-simulator.jar
     - name: Create simulated run output directories
       run: |
-        mkdir -p artifacts/simulated_runs/{M00123,M00456,VH00123}/22
+        mkdir -p artifacts/artifacts/simulated_runs/{M00123,M00456,VH00123}/22
     - name: Run Run Simulator
       run: |
-        timeout 10 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/illumina-run-simulator.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 10 java -jar illumina-run-simulator.jar --config test/data/illumina-run-simulator/config.edn 2> >(tee artifacts/artifacts/illumina-run-simulator.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        .github/scripts/add_qc_check_complete.py --simulated-runs-dir artifacts/artifacts/simulated_runs
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
@@ -49,10 +50,10 @@ jobs:
         mkdir -p test_output/symlinks_by_project
     - name: Run Auto Symlinker
       run: |
-        timeout 15 auto-fastq-symlink --config test/data/config/integration_testing/config.json --log-level debug 2> >(tee artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 15 auto-fastq-symlink --config test/data/config/integration_testing/config.json --log-level debug 2> >(tee artifacts/artifacts/auto-fastq-symlink.log.jsonl) || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
     - name: Copy db to Artifacts
       run: |
-        cp symlinks.db artifacts
+        cp symlinks.db artifacts/artifacts
     - uses: actions/upload-artifact@v1
       with:
         name: Artifacts

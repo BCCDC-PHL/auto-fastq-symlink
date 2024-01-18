@@ -1,8 +1,8 @@
 {
     "run_parent_dirs": [
-        "artifacts/simulated_runs/M00123/22",
-        "artifacts/simulated_runs/M00456/22",
-        "artifacts/simulated_runs/VH00123/22"
+        "artifacts/artifacts/simulated_runs/M00123/22",
+        "artifacts/artifacts/simulated_runs/M00456/22",
+        "artifacts/artifacts/simulated_runs/VH00123/22"
     ],
     "projects_definition_file": "test/data/config/integration_testing/projects.csv",
     "project_id_translation_file": "test/data/config/integration_testing/project_id_translation.csv",

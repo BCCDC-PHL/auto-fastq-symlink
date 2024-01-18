@@ -40,6 +40,9 @@ def main():
     quit_when_safe = False
 
     while(True):
+        if quit_when_safe:
+            exit(0)
+
         try:
             if args.config:
                 logging.info(json.dumps({"event_type": "load_config_start", "config_file": os.path.abspath(args.config)}))
