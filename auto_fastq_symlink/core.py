@@ -345,6 +345,8 @@ def find_symlinks(projects):
         if os.path.exists(fastq_symlinks_dir):
             project_symlinks_by_run_dirs = os.scandir(fastq_symlinks_dir)
             for project_symlinks_by_run_dir in project_symlinks_by_run_dirs:
+                if not os.path.isdir(project_symlinks_by_run_dir):
+                    continue
                 project_symlinks_by_run_dir_contents = os.scandir(project_symlinks_by_run_dir)
                 for dir_item in project_symlinks_by_run_dir_contents:
                     if os.path.islink(dir_item):
