@@ -13,12 +13,15 @@ import auto_fastq_symlink.db as db
 
 def collect_project_info(config: dict[str, object]) -> dict[str, str]:
     """
+    Collect project info from config and return it as a dictionary.
+
+    :param config: Application config.
+    :type config: dict[str, object]
+    :return: Project info, indexed by project ID.
+    :rtype: dict[str, str]
     """
     projects = {}
     projects = config['projects']
-    # projects_json_safe = auto_fastq_symlink.config.make_config_json_serializable(config)
-    # print(json.dumps(projects_json_safe, indent=2))
-    # exit(0)
     
     return projects
 
@@ -28,6 +31,12 @@ def _find_fastq_directory(run_dir_path, instrument_type):
     Old (v1) MiSeq directory strucuture: Data/Intensities/BaseCalls
     New (v2) MiSeq directory structure: like: Alignment_1/20220619_120702/Fastq
     NextSeq directory structure: like: Analysis/1/Data/fastq
+
+    :param run_dir_path: Path to the sequencing run directory.
+    :type run_dir_path: str
+    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :type instrument_type: str
+    :return: Path to the fastq directory, or None if it can't be found.
     """
     fastq_directory = ""
     if instrument_type == 'miseq':
@@ -62,6 +71,14 @@ def _find_fastq_directory(run_dir_path, instrument_type):
 
 def _determine_libraries_section(samplesheet, instrument_type):
     """
+    Determine which section of the SampleSheet contains the library info.
+
+    :param samplesheet: The parsed SampleSheet.
+    :type samplesheet: dict[str, object]
+    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :type instrument_type: str
+    :return: The section of the SampleSheet that contains the library info.
+    :rtype: str | None
     """
     if instrument_type == 'miseq':
         libraries_section = 'data'
@@ -75,6 +92,14 @@ def _determine_libraries_section(samplesheet, instrument_type):
 
 def _determine_project_header(samplesheet, instrument_type):
     """
+    For MiSeq runs, the SampleSheet has two fields that can either be used for the project ID.
+
+    :param samplesheet: The parsed SampleSheet.
+    :type samplesheet: dict[str, object]
+    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :type instrument_type: str
+    :return: The header of the field that contains the project ID.
+    :rtype: str | None
     """
     if instrument_type == 'miseq':
         project_header = 'sample_project'
@@ -93,6 +118,13 @@ def _determine_library_id_header(samplesheet, instrument_type):
     might be blank, or it might be filled with 'S1', 'S2', 'S3', etc.
     In order to find the correct field to use for the library ID, we need to look through those
     columns to check which was actually used for the librar ID on this run.
+
+    :param samplesheet: The parsed SampleSheet.
+    :type samplesheet: dict[str, object]
+    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :type instrument_type: str
+    :return: The header of the field that contains the library ID.
+    :rtype: str | None
     """
     libraries_section = _determine_libraries_section(samplesheet, instrument_type)
     if instrument_type == 'miseq':
@@ -114,6 +146,12 @@ def _determine_library_id_header(samplesheet, instrument_type):
 
 def _sanitize_library_id(library_id: str):
     """
+    Sanitize library ID by replacing invalid characters with '-'.
+
+    :param library_id: The library ID.
+    :type library_id: str
+    :return: The sanitized library ID.
+    :rtype: str
     """
     sanitized_library_id = library_id.strip()
     sanitized_library_id = sanitized_library_id.replace('_', '-') # There shouldn't be underscores in library IDs, but if there are, they get swapped with '-' in fastq filenames.
@@ -195,7 +233,6 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
         libraries.append(library)
         
 
-
     return libraries
     
 
@@ -224,7 +261,36 @@ def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]
                 instrument_type = "miseq"
             elif re.match(nextseq_run_id_regex, run_id):
                 instrument_type = "nextseq"
-            if subdir.is_dir() and instrument_type != None and os.path.exists(os.path.join(subdir.path, "upload_complete.json")):
+
+            subdir_is_dir = os.path.isdir(subdir.path)
+            upload_complete_file_exists = os.path.exists(os.path.join(subdir.path, "upload_complete.json"))
+            qc_check_complete_file_exists = os.path.exists(os.path.join(subdir.path, "qc_check_complete.json"))
+            determined_instrument_type = instrument_type != None
+
+            passed_run_qc_check = False
+            if qc_check_complete_file_exists:
+                try:
+                    qc_check = json.load(open(os.path.join(subdir.path, "qc_check_complete.json")))
+                except json.decoder.JSONDecodeError as e:
+                    logging.error(json.dumps({"event_type": "qc_check_json_decode_error", "sequencing_run_id": run_id, "error": str(e)}))
+                    qc_check = {}
+                overall_pass_fail = qc_check.get('overall_pass_fail', None)
+                if overall_pass_fail is not None and re.match("PASS", overall_pass_fail, re.IGNORECASE):
+                    passed_run_qc_check = True
+
+            conditions_checked = {
+                'subdir_is_directory': subdir_is_dir,
+                'upload_complete': upload_complete_file_exists,
+                'qc_check_complete': qc_check_complete_file_exists,
+                'passed_run_qc_check': passed_run_qc_check,
+                'determined_instrument_type': determined_instrument_type,
+            }
+            conditions_met = [v for k, v in conditions_checked.items()]
+            if not all(conditions_met):
+                logging.info(json.dumps({"event_type": "skipped_run", "sequencing_run_id": run_id, "conditions_checked": conditions_checked}))
+                yield None
+
+            if all(conditions_met):
                 logging.info(json.dumps({"event_type": "scan_run_start", "sequencing_run_id": run_id}))
                 samplesheet_paths = ss.find_samplesheets(subdir.path, instrument_type)
                 fastq_directory = _find_fastq_directory(subdir.path, instrument_type)
