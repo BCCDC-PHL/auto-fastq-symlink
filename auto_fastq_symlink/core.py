@@ -41,9 +41,9 @@ def _find_fastq_directory(run_dir_path, instrument_type):
     fastq_directory = ""
     if instrument_type == 'miseq':
         run_subdirs = set([subdir.name for subdir in os.scandir(run_dir_path)])
-        version_2_miseq_dir_structure = any([re.match("Alignment_\d+", subdir) for subdir in run_subdirs])
+        version_2_miseq_dir_structure = any([re.match("Alignment_\\d+", subdir) for subdir in run_subdirs])
         if version_2_miseq_dir_structure:
-            alignment_subdirs = list(filter(lambda x: re.match("Alignment_\d+", x), run_subdirs))
+            alignment_subdirs = list(filter(lambda x: re.match("Alignment_\\d+", x), run_subdirs))
             alignment_subdir_nums = list(map(lambda x: int(x.split('_')[1]), alignment_subdirs))
             greatest_alignment_subdir_num = sorted(alignment_subdir_nums, reverse=True)[0]
             alignment_directory = os.path.join(run_dir_path, "Alignment_" + str(greatest_alignment_subdir_num))
@@ -130,8 +130,8 @@ def _determine_library_id_header(samplesheet, instrument_type):
     if instrument_type == 'miseq':
         sample_ids = [library['sample_id'] for library in samplesheet[libraries_section]]
         all_sample_ids_blank = all([sample_id == "" for sample_id in sample_ids])
-        all_sample_ids_s_plus_digits = all([re.match("S\d+", sample_id) for sample_id in sample_ids])
-        all_sample_ids_only_digits = all([re.match("\d+", sample_id) for sample_id in sample_ids])
+        all_sample_ids_s_plus_digits = all([re.match("S\\d+", sample_id) for sample_id in sample_ids])
+        all_sample_ids_only_digits = all([re.match("\\d+", sample_id) for sample_id in sample_ids])
         if all_sample_ids_blank or all_sample_ids_s_plus_digits or all_sample_ids_only_digits:
             library_id_header = 'sample_name'
         else:
@@ -181,15 +181,23 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     libraries = []
     # If we can't confirm that the fastq directory exists, no sense continuing.
     # Short-circuit and return an empty list.
-    if not run['fastq_directory'] or not os.path.exists(run['fastq_directory']):
-        logging.error(json.dumps({"event_type": "find_libraries_failed", "sequencing_run_id": run_id, "run_fastq_directory": run['fastq_directory']}))
+    fastq_dir = None
+    if 'fastq_directory' not in run or not run['fastq_directory']:
+        logging.error(json.dumps({"event_type": "find_libraries_failed", "sequencing_run_id": run_id}))
         return libraries
+    else:
+        fastq_dir = run['fastq_directory']
+
+    if not os.path.exists(fastq_dir):
+        logging.error(json.dumps({"event_type": "find_libraries_failed", "sequencing_run_id": run_id}))
+        return libraries
+
     libraries_section = _determine_libraries_section(samplesheet, run['instrument_type'])
     project_header = _determine_project_header(samplesheet, run['instrument_type'])
 
     has_correct_extension = lambda x: any([x.endswith(ext) for ext in fastq_extensions])
-    run_fastq_dir_contents = os.listdir(run['fastq_directory'])
-    run_fastq_files = set(filter(lambda x: all([has_correct_extension(x), os.path.isfile(os.path.join(run['fastq_directory'], x))]), run_fastq_dir_contents))
+    run_fastq_dir_contents = os.listdir(fastq_dir)
+    run_fastq_files = set(filter(lambda x: all([has_correct_extension(x), os.path.isfile(os.path.join(fastq_dir, x))]), run_fastq_dir_contents))
 
     library_id_header = _determine_library_id_header(samplesheet, run['instrument_type'])
     
@@ -207,18 +215,18 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
         library['library_id'] = library_id
         library['project_id'] = project_id
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id}))
-        r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R1_' + '.*', x), run_fastq_files))
+        r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+_L\\d{3}' + '_R1_' + '\\d{3}', x), run_fastq_files))
         if len(r1_fastq_filenames) > 0:
             r1_fastq_filename = r1_fastq_filenames[0]
         else:
             r1_fastq_filename = None
-        r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '.*' + '_R2_' + '.*', x), run_fastq_files))
+        r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+_L\\d{3}' + '_R2_' + '\\d{3}', x), run_fastq_files))
         if len(r2_fastq_filenames) > 0:
             r2_fastq_filename = r2_fastq_filenames[0]
         else:
             r2_fastq_filename = None
-        r1_fastq_path = os.path.join(run['fastq_directory'], r1_fastq_filename) if r1_fastq_filename else None
-        r2_fastq_path = os.path.join(run['fastq_directory'], r2_fastq_filename) if r2_fastq_filename else None
+        r1_fastq_path = os.path.join(fastq_dir, r1_fastq_filename) if r1_fastq_filename else None
+        r2_fastq_path = os.path.join(fastq_dir, r2_fastq_filename) if r2_fastq_filename else None
         if r1_fastq_path and os.path.exists(r1_fastq_path):
             logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R1", "fastq_path": r1_fastq_path}))
             library['fastq_path_r1'] = r1_fastq_path
@@ -239,7 +247,7 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
 def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]]:
     """
     Find all sequencing runs under all of the `run_parent_dirs` from the config.
-    Runs are found by matching sub-directory names against the following regexes: `"\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"` (MiSeq) and `"\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"` (NextSeq)
+    Runs are found by matching sub-directory names against the following regexes: `"\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"` (MiSeq) and `"\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"` (NextSeq)
 
     :param config: Application config.
     :type config: dict[str, object]
@@ -247,8 +255,8 @@ def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]
     :rtype: Iterable[dict[str, object]]
     """
     run = {}
-    miseq_run_id_regex = "\d{6}_M\d{5}_\d+_\d{9}-[A-Z0-9]{5}"
-    nextseq_run_id_regex = "\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}"
+    miseq_run_id_regex = "\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"
+    nextseq_run_id_regex = "\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"
     run_parent_dirs = config['run_parent_dirs']
     fastq_extensions = config['fastq_extensions']
     for run_parent_dir in run_parent_dirs:
