@@ -215,15 +215,17 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
         library['library_id'] = library_id
         library['project_id'] = project_id
         logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id}))
-        r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+_L\\d{3}' + '_R1_' + '\\d{3}', x), run_fastq_files))
+        r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+(_L\\d{3})?' + '_R1_' + '\\d{3}', x), run_fastq_files))
         if len(r1_fastq_filenames) > 0:
             r1_fastq_filename = r1_fastq_filenames[0]
         else:
+            logging.debug(json.dumps({"event_type": "failed_to_find_R1_fastq", "sequencing_run_id": run_id, "library_id": library_id, "samplesheet_project_id": project_id}))
             r1_fastq_filename = None
-        r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+_L\\d{3}' + '_R2_' + '\\d{3}', x), run_fastq_files))
+        r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+(_L\\d{3})?' + '_R2_' + '\\d{3}', x), run_fastq_files))
         if len(r2_fastq_filenames) > 0:
             r2_fastq_filename = r2_fastq_filenames[0]
         else:
+            logging.debug(json.dumps({"event_type": "failed_to_find_R2_fastq", "sequencing_run_id": run_id, "library_id": library_id, "samplesheet_project_id": project_id}))
             r2_fastq_filename = None
         r1_fastq_path = os.path.join(fastq_dir, r1_fastq_filename) if r1_fastq_filename else None
         r2_fastq_path = os.path.join(fastq_dir, r2_fastq_filename) if r2_fastq_filename else None
