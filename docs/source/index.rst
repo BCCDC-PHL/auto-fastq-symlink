@@ -24,7 +24,7 @@ auto_fastq_symlink.core
 =======================
 
 .. autofunction:: auto_fastq_symlink.core.scan
-.. autofunction:: auto_fastq_symlink.core.symlink
+.. autofunction:: auto_fastq_symlink.core.symlink_run
 
 
 auto_fastq_symlink.config
@@ -32,10 +32,6 @@ auto_fastq_symlink.config
 
 .. autofunction:: auto_fastq_symlink.config.parse_projects_definition_file
 .. autofunction:: auto_fastq_symlink.config.load_config
-
-
-auto_fastq_symlink.db
-=====================
 
 
 auto_fastq_symlink.samplesheet
