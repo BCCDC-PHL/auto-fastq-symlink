@@ -62,20 +62,30 @@ def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Opti
     return latest_demultiplexing
 
 
-def _find_samplesheet(run_dir_path: str, demultiplexing_output_dir_path: str) -> Optional[str]:
+def _find_samplesheet(run_dir_path: str, demultiplexing_output_dir_path: str, instrument_type: str) -> Optional[str]:
     """
     Find the SampleSheet to use for a demultiplexing. A SampleSheet in the demultiplexing output
     directory is preferred. If there isn't one, fall back to the SampleSheet at the top level of the run directory.
+
+    For MiSeq runs with the new (v2) directory structure, the SampleSheet in the demultiplexing output
+    directory (`Alignment_N/<timestamp>`) is always named `SampleSheetUsed.csv`, so only that file is considered there.
 
     :param run_dir_path: Path to the sequencing run directory.
     :type run_dir_path: str
     :param demultiplexing_output_dir_path: Path to the demultiplexing output directory.
     :type demultiplexing_output_dir_path: str
+    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :type instrument_type: str
     :return: Path to the SampleSheet, or None if it can't be found.
     :rtype: str | None
     """
-    samplesheet_path = ss.choose_samplesheet_to_parse(ss.find_samplesheets(demultiplexing_output_dir_path))
-    if samplesheet_path is None and os.path.abspath(demultiplexing_output_dir_path) != os.path.abspath(run_dir_path):
+    output_dir_is_run_dir = os.path.abspath(demultiplexing_output_dir_path) == os.path.abspath(run_dir_path)
+    if instrument_type == 'miseq' and not output_dir_is_run_dir:
+        samplesheet_used_path = os.path.join(demultiplexing_output_dir_path, "SampleSheetUsed.csv")
+        samplesheet_path = samplesheet_used_path if os.path.isfile(samplesheet_used_path) else None
+    else:
+        samplesheet_path = ss.choose_samplesheet_to_parse(ss.find_samplesheets(demultiplexing_output_dir_path))
+    if samplesheet_path is None and not output_dir_is_run_dir:
         samplesheet_path = ss.choose_samplesheet_to_parse(ss.find_samplesheets(run_dir_path))
 
     return samplesheet_path
@@ -329,7 +339,7 @@ def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]
                         "run_directory": subdir.path,
                         "fastq_directory": latest_demultiplexing['fastq_directory'],
                     }
-                    samplesheet_to_parse = _find_samplesheet(subdir.path, latest_demultiplexing['output_directory'])
+                    samplesheet_to_parse = _find_samplesheet(subdir.path, latest_demultiplexing['output_directory'], instrument_type)
                     if samplesheet_to_parse:
                         logging.debug(json.dumps({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
                     else:

@@ -213,7 +213,24 @@ class TestCore(unittest.TestCase):
         run_dir = self._create_miseq_run(libraries)
         output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
 
-        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), core._find_samplesheet(run_dir, output_dir))
+        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+
+    def test_miseq_samplesheet_used_preferred_over_competing_samplesheets_in_alignment_dir(self):
+        libraries = [('LIB-A', 'routine_testing')]
+        run_dir = self._create_miseq_run(libraries)
+        output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
+        for competing_samplesheet in ['SampleSheet.csv', 'SampleSheet_old.csv']:
+            _write_miseq_samplesheet(os.path.join(output_dir, competing_samplesheet), libraries)
+
+        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+
+    def test_miseq_alignment_dir_samplesheet_other_than_samplesheet_used_ignored(self):
+        libraries = [('LIB-A', 'routine_testing')]
+        run_dir = self._create_miseq_run(libraries)
+        output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
+        os.rename(os.path.join(output_dir, 'SampleSheetUsed.csv'), os.path.join(output_dir, 'SampleSheet.csv'))
+
+        self.assertEqual(os.path.join(run_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
 
     def test_miseq_falls_back_to_run_level_samplesheet(self):
         libraries = [('LIB-A', 'routine_testing')]
@@ -221,7 +238,17 @@ class TestCore(unittest.TestCase):
         output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
         os.remove(os.path.join(output_dir, 'SampleSheetUsed.csv'))
 
-        self.assertEqual(os.path.join(run_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir))
+        self.assertEqual(os.path.join(run_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+
+    def test_nextseq_samplesheet_selection_unchanged(self):
+        run_dir = os.path.join(self.runs_dir, NEXTSEQ_RUN_ID)
+        output_dir = os.path.join(run_dir, 'Analysis', '1', 'Data')
+        os.makedirs(output_dir)
+        _write_nextseq_samplesheet(os.path.join(run_dir, 'SampleSheet.csv'), [('LIB-A', 'routine_testing')])
+        _write_nextseq_samplesheet(os.path.join(output_dir, 'SampleSheet.csv'), [('LIB-A', 'routine_testing')])
+        _write_nextseq_samplesheet(os.path.join(output_dir, 'SampleSheet_old.csv'), [('LIB-A', 'routine_testing')])
+
+        self.assertEqual(os.path.join(output_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir, 'nextseq'))
 
     def test_nextseq_latest_analysis_chosen_numerically(self):
         run_dir = os.path.join(self.runs_dir, NEXTSEQ_RUN_ID)
