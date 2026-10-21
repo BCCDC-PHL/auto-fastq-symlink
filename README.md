@@ -147,7 +147,9 @@ Once a project's symlinks directory for a run has been created, it is never modi
 
 Wait until the new demultiplexing is complete before deleting the symlinks directory. Otherwise the symlinks may be created from an incomplete set of fastq files.
 
-Each symlinks directory is built under a temporary name (`.<run_id>.tmp`) and renamed into place once it is complete. If the application is interrupted part-way through, the temporary directory is removed and re-built on the next scan.
+Each symlinks directory is built under a temporary name (`.<run_id>.tmp`) and renamed into place once all of its symlinks have been created. The `symlinks_complete.json` file is only written after the rename, so it never appears in the temporary directory. Downstream systems can treat the presence of `<run_id>/symlinks_complete.json` as the signal that the directory is ready.
+
+If the application is interrupted before the rename, the temporary directory is removed and re-built on the next scan. If it is interrupted in the brief moment after the rename but before `symlinks_complete.json` is written, the directory is left without that file and a `run_symlinks_dir_missing_symlinks_complete` warning is logged on each scan. Delete the directory to re-generate it.
 
 ## Testing
 

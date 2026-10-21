@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import auto_fastq_symlink.core as core
 
@@ -254,6 +255,28 @@ class TestCore(unittest.TestCase):
 
         self.assertEqual({'LIB-A_R1.fastq.gz', 'LIB-A_R2.fastq.gz'}, set(self._symlink_targets('routine_testing', MISEQ_RUN_ID)))
         self.assertFalse(os.path.exists(self._run_symlinks_dir('assay_development', MISEQ_RUN_ID)))
+
+    def test_symlinks_complete_written_only_after_rename(self):
+        libraries = [('LIB-A', 'routine_testing')]
+        run_dir = self._create_miseq_run(libraries)
+        self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
+        tmp_run_symlinks_dir = os.path.join(self.config['projects']['routine_testing']['fastq_symlinks_dir'], '.' + MISEQ_RUN_ID + '.tmp')
+        tmp_dir_contents_at_rename = []
+        real_rename = os.rename
+
+        def recording_rename(src, dst):
+            if src == tmp_run_symlinks_dir:
+                tmp_dir_contents_at_rename.extend(os.listdir(src))
+            real_rename(src, dst)
+
+        with mock.patch('auto_fastq_symlink.core.os.rename', side_effect=recording_rename):
+            self._scan_and_symlink()
+
+        self.assertEqual({'LIB-A_R1.fastq.gz', 'LIB-A_R2.fastq.gz'}, set(tmp_dir_contents_at_rename))
+        self.assertEqual(
+            {'LIB-A_R1.fastq.gz', 'LIB-A_R2.fastq.gz', 'symlinks_complete.json'},
+            set(os.listdir(self._run_symlinks_dir('routine_testing', MISEQ_RUN_ID))),
+        )
 
     def test_incomplete_tmp_dir_replaced(self):
         libraries = [('LIB-A', 'routine_testing')]

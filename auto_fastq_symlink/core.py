@@ -414,7 +414,12 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run: dict[st
 
         run_symlinks_dir = os.path.join(project['fastq_symlinks_dir'], run_id)
         if os.path.lexists(run_symlinks_dir):
-            logging.debug(json.dumps({"event_type": "run_symlinks_dir_already_exists", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir}))
+            if not os.path.exists(os.path.join(run_symlinks_dir, 'symlinks_complete.json')):
+                # Most likely the application was interrupted between creating the directory and writing
+                # symlinks_complete.json. Leave it alone, but make it visible. Delete the directory to re-generate it.
+                logging.warning(json.dumps({"event_type": "run_symlinks_dir_missing_symlinks_complete", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir}))
+            else:
+                logging.debug(json.dumps({"event_type": "run_symlinks_dir_already_exists", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir}))
             continue
 
         symlinks = []
@@ -449,9 +454,11 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
     """
     Create a symlinks directory for the run under each project's `fastq_symlinks_dir`.
 
-    The directory is built under a temporary hidden name (`.<run_id>.tmp`) and then renamed into place,
-    so that `<fastq_symlinks_dir>/<run_id>` only ever appears complete. If the application is
-    interrupted part-way through, the temporary directory is cleared out and re-built on the next scan.
+    The symlinks are created under a temporary hidden directory (`.<run_id>.tmp`), which is then renamed into place.
+    `symlinks_complete.json` (which signals to downstream systems that the directory is ready) is only written
+    after the rename, and is itself written to a temporary file and renamed, so it never appears in the
+    temporary directory and is never partially written. If the application is interrupted before the rename,
+    the temporary directory is cleared out and re-built on the next scan.
 
     :param config: Application config.
     :type config: dict[str, object]
@@ -482,13 +489,6 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
             os.symlink(src=symlink['target'], dst=os.path.join(tmp_run_symlinks_dir, symlink['path']))
             symlinks_complete.append({"target": symlink['target'], "path": os.path.join(run_symlinks_dir, symlink['path'])})
 
-        project_symlinks_complete = {
-            'num_symlinks_created': len(symlinks_complete),
-            'timestamp': datetime.datetime.now().isoformat(),
-        }
-        with open(os.path.join(tmp_run_symlinks_dir, 'symlinks_complete.json'), 'w') as f:
-            f.write(json.dumps(project_symlinks_complete, indent=2) + '\n')
-
         try:
             os.rename(tmp_run_symlinks_dir, run_symlinks_dir)
         except OSError as e:
@@ -496,6 +496,15 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
             logging.error(json.dumps({"event_type": "rename_run_symlinks_dir_failed", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir, "error": str(e)}))
             shutil.rmtree(tmp_run_symlinks_dir)
             continue
+
+        project_symlinks_complete = {
+            'num_symlinks_created': len(symlinks_complete),
+            'timestamp': datetime.datetime.now().isoformat(),
+        }
+        tmp_symlinks_complete_path = os.path.join(run_symlinks_dir, '.symlinks_complete.json.tmp')
+        with open(tmp_symlinks_complete_path, 'w') as f:
+            f.write(json.dumps(project_symlinks_complete, indent=2) + '\n')
+        os.rename(tmp_symlinks_complete_path, os.path.join(run_symlinks_dir, 'symlinks_complete.json'))
 
         symlinks_complete_by_project_id[project_id] = symlinks_complete
 
