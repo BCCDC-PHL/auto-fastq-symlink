@@ -151,6 +151,8 @@ Each symlinks directory is built under a temporary name (`.<run_id>.tmp`) and re
 
 If the application is interrupted before the rename, the temporary directory is removed and re-built on the next scan. If it is interrupted in the brief moment after the rename but before `symlinks_complete.json` is written, the directory is left without that file and a `run_symlinks_dir_missing_symlinks_complete` warning is logged on each scan. Delete the directory to re-generate it.
 
+Only one instance of the application should run against a given set of `fastq_symlinks_dir`s at a time. Concurrent instances aren't guarded against, and could interfere with each other's temporary directories.
+
 ## Testing
 
 Unit tests can be run from the top-level of the source directory as follows:
