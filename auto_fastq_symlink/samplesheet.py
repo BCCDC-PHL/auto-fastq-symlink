@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from typing import Optional
 
 import jsonschema
 
@@ -374,63 +375,42 @@ def _parse_samplesheet_nextseq_v1(samplesheet_path):
     return samplesheet
 
 
-def find_samplesheets(run_dir, instrument_type):
+def find_samplesheets(directory: str) -> list[str]:
     """
+    Find all SampleSheet files (named like `SampleSheet*.csv`) directly inside a directory.
+
+    :param directory: Directory to search.
+    :type directory: str
+    :return: List of paths to SampleSheet files.
+    :rtype: list[str]
     """
-    samplesheet_paths = None
-    if instrument_type == 'miseq':
-        samplesheet_paths = glob.glob(os.path.join(run_dir, "SampleSheet*.csv"))
-    elif instrument_type == 'nextseq':
-        top_level_samplesheets = glob.glob(os.path.join(run_dir, "SampleSheet*.csv"))
-        analysis_dir_samplesheets = glob.glob(os.path.join(run_dir, "Analysis", "*", "Data", "SampleSheet*.csv"))
-        samplesheet_paths = top_level_samplesheets + analysis_dir_samplesheets                                    
+    samplesheet_paths = sorted(glob.glob(os.path.join(directory, "SampleSheet*.csv")))
+
     return samplesheet_paths
 
 
-def choose_samplesheet_to_parse(samplesheet_paths: list[str], instrument_type: str, run_id: str):
+def choose_samplesheet_to_parse(samplesheet_paths: list[str]) -> Optional[str]:
     """
-    A run directory may have multiple SampleSheet.csv files in it. Choose only one to parse.
+    A directory may have multiple SampleSheet files in it. Choose only one to parse.
+    A file named exactly `SampleSheet.csv` is preferred. Otherwise, if there is only one
+    SampleSheet, it is chosen.
 
-    :param samplesheet_paths: List of paths to SampleSheet.csv files
+    :param samplesheet_paths: List of paths to SampleSheet files, all in the same directory.
     :type samplesheet_paths: list[str]
-    :param instrument_type: Instrument type, should be one of: "miseq", "nextseq"
-    :type instrument_type: str
-    :param run_id: Sequencing run ID
-    :type run_id: str
+    :return: Path to the SampleSheet to parse, or None if one can't be chosen.
+    :rtype: str | None
     """
     samplesheet_to_parse = None
-    if instrument_type == 'miseq':
-        for samplesheet_path in samplesheet_paths:
-            if re.match("SampleSheet\.csv", os.path.basename(samplesheet_path)):
-                samplesheet_to_parse = samplesheet_path
-        if not samplesheet_to_parse:
-            if len(samplesheet_paths) == 1:
-                samplesheet_to_parse = samplesheet_paths[0]
-            else:
-                # If there isn't a top-level "SampleSheet.csv", and there are more than
-                # one SampleSheet, then we have no other way of deciding which is preferable.
-                pass
-    elif instrument_type == 'nextseq':
-        samplesheets_by_analysis_num = {}
-        for samplesheet_path in samplesheet_paths:
-            match = re.search("Analysis/(\d+)/Data", samplesheet_path)
-            if match:
-                analysis_num = int(match.group(1))
-                samplesheets_by_analysis_num[analysis_num] = samplesheet_path
-        largest_analysis_num = 0
-        for analysis_num, samplesheet_path in samplesheets_by_analysis_num.items():
-            if analysis_num > largest_analysis_num:
-                largest_analysis_num = analysis_num
-        if largest_analysis_num > 0:
-            samplesheet_to_parse = samplesheets_by_analysis_num[largest_analysis_num]
-        if not samplesheet_to_parse:
-            if len(samplesheet_paths) == 1:
-                samplesheet_to_parse = samplesheet_paths[0]
-            else:
-                # If there isn't a top-level "SampleSheet.csv", and there are more than
-                # one SampleSheet, then we have no other way of deciding which is preferable.
-                pass
-
+    for samplesheet_path in samplesheet_paths:
+        if os.path.basename(samplesheet_path) == "SampleSheet.csv":
+            samplesheet_to_parse = samplesheet_path
+    if not samplesheet_to_parse:
+        if len(samplesheet_paths) == 1:
+            samplesheet_to_parse = samplesheet_paths[0]
+        else:
+            # If there isn't a "SampleSheet.csv", and there are more than
+            # one SampleSheet, then we have no other way of deciding which is preferable.
+            pass
 
     return samplesheet_to_parse
 
