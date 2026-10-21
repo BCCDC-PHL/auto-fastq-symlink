@@ -61,7 +61,7 @@ def main():
     parser.add_argument('-c', '--config', required=True)
     parser.add_argument('-i', '--scan-interval', type=float, default=10, help='Seconds between scans, if not set by "scan_interval_seconds" in the config (default: 10)')
     parser.add_argument('--log-level', default='info', choices=['debug', 'info', 'warning', 'error'])
-    parser.add_argument('--log-file', help='Append logs to this file, rotated daily at midnight (default: log to stderr)')
+    parser.add_argument('--log-file', help='Append logs to this file, rotated daily at midnight (default: log to stdout)')
     parser.add_argument('--log-retention-days', type=int, default=90, help='Number of rotated log files to keep. 0 keeps all of them (default: 90)')
     args = parser.parse_args()
 

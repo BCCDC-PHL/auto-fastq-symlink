@@ -167,12 +167,12 @@ Logs are written in [JSON Lines](https://jsonlines.org/) format, one log entry p
 
 Unexpected errors also include an `exception` field with the traceback.
 
-By default, logs are written to stderr. The following command-line options control logging:
+By default, logs are written to stdout. The following command-line options control logging:
 
 | Option                       | Description                                                                                                                       |
 |------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
 | `--log-level`                | `debug`, `info` (default), `warning` or `error`                                                                                    |
-| `--log-file`                 | Append logs to this file instead of stderr. The file is rotated at midnight, and rotated files are named with the date they cover (eg. `auto-fastq-symlink.jsonl.2026-10-21`) |
+| `--log-file`                 | Append logs to this file instead of stdout. The file is rotated at midnight, and rotated files are named with the date they cover (eg. `auto-fastq-symlink.jsonl.2026-10-21`) |
 | `--log-retention-days`       | Number of rotated log files to keep (default: 90). `0` keeps all of them                                                           |
 
 ## Testing

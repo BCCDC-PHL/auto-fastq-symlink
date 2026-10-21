@@ -107,12 +107,12 @@ def make_log_handler(log_file: Optional[os.PathLike]=None, log_retention_days: i
     If a log file is given, the log is appended to that file (so restarting doesn't overwrite it), and rotated at midnight.
     Rotated logs are named with the date they cover (eg. 'auto-fastq-symlink.jsonl.2026-10-05').
 
-    :param log_file: Path to the log file. If None, log to stderr.
+    :param log_file: Path to the log file. If None, log to stdout.
     :param log_retention_days: Number of rotated log files to keep. Older ones are deleted. 0 keeps all of them.
     :return: The log handler.
     """
     if log_file is None:
-        return logging.StreamHandler(sys.stderr)
+        return logging.StreamHandler(sys.stdout)
 
     return logging.handlers.TimedRotatingFileHandler(log_file, when='midnight', backupCount=log_retention_days, encoding='utf-8')
 
@@ -122,7 +122,7 @@ def configure_logging(log_level: str="info", log_file: Optional[os.PathLike]=Non
     Configure logging
 
     :param log_level: Log level ('debug', 'info', 'warning', 'error') default: 'info'
-    :param log_file: Path to the log file. If None, log to stderr.
+    :param log_file: Path to the log file. If None, log to stdout.
     :param log_retention_days: Number of rotated log files to keep. 0 keeps all of them.
     """
     handler = make_log_handler(log_file, log_retention_days)
