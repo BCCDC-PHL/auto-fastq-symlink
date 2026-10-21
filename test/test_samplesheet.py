@@ -1,11 +1,9 @@
 import os
 import jsonschema
-import logging
 import unittest
 
 import auto_fastq_symlink.samplesheet as ss
 
-logging.disable(logging.CRITICAL)
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 

@@ -107,6 +107,8 @@ The application cycles between two phases:
 
 The config file is loaded, then the `project_definition_file` listed in the config file is loaded, then the exclusion lists that are listed in the project definition file are also loaded.
 
+The config is re-loaded before every scan, so changes (including changes to the exclusion lists) take effect without restarting. If the config (or any file it refers to) can't be loaded when the application starts, it exits with an error. If it can't be re-loaded later, a `load_config_failed` error is logged and the application continues with the last valid config.
+
 2. **Find and symlink runs**
 
 Look through all of the `run_parent_dirs` listed in the config file, and find any sub-directories that match the standard illumina sequencing run ID format. When a run directory is found:
@@ -116,9 +118,11 @@ Look through all of the `run_parent_dirs` listed in the config file, and find an
 	3. For each project that has libraries on the run, check whether the project already has a symlinks directory for the run (`<fastq_symlinks_dir>/<run_id>`). If it does, leave it alone.
 	4. Otherwise, create the symlinks directory for the run.
 
-The application then pauses for the amount of time defined under the `scan_interval_seconds` config value, then repeats.
+A problem with one run (for example, a file that can't be read) is logged, and doesn't stop other runs from being symlinked. The run will be tried again on the next scan. Likewise, a run parent dir that can't be read is logged and skipped for that scan.
 
-If the application is interrupted (via `Ctrl-c`), it will catch the signal and wait for a safe time before exiting (in between runs or before starting a new scan for runs).
+Each scan starts `scan_interval_seconds` (from the config) after the previous scan started, or immediately if the previous scan took longer than that. If `scan_interval_seconds` isn't set in the config, the `--scan-interval` command-line option is used (default: 10 seconds).
+
+If the application receives `SIGINT` (via `Ctrl-c`) or `SIGTERM`, it will wait for a safe time before exiting (in between runs, or while waiting for the next scan). A second signal stops it immediately.
 
 ```mermaid
 flowchart TD
@@ -152,6 +156,24 @@ Each symlinks directory is built under a temporary name (`.<run_id>.tmp`) and re
 If the application is interrupted before the rename, the temporary directory is removed and re-built on the next scan. If it is interrupted in the brief moment after the rename but before `symlinks_complete.json` is written, the directory is left without that file and a `run_symlinks_dir_missing_symlinks_complete` warning is logged on each scan. Delete the directory to re-generate it.
 
 Only one instance of the application should run against a given set of `fastq_symlinks_dir`s at a time. Concurrent instances aren't guarded against, and could interfere with each other's temporary directories.
+
+## Logging
+
+Logs are written in [JSON Lines](https://jsonlines.org/) format, one log entry per line:
+
+```json
+{"timestamp": "2026-10-21T14:58:10.982", "level": "INFO", "module": "core", "function_name": "symlink_run", "line_num": 553, "message": {"event_type": "symlink_run_complete", "sequencing_run_id": "220602_M00123_300_000000000-Q5539", "total_num_symlinks_created": 12, "num_symlinks_created_by_project_id": {"routine_testing": 12}}}
+```
+
+Unexpected errors also include an `exception` field with the traceback.
+
+By default, logs are written to stderr. The following command-line options control logging:
+
+| Option                       | Description                                                                                                                       |
+|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `--log-level`                | `debug`, `info` (default), `warning` or `error`                                                                                    |
+| `--log-file`                 | Append logs to this file instead of stderr. The file is rotated at midnight, and rotated files are named with the date they cover (eg. `auto-fastq-symlink.jsonl.2026-10-21`) |
+| `--log-retention-days`       | Number of rotated log files to keep (default: 90). `0` keeps all of them                                                           |
 
 ## Testing
 

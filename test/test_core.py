@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import shutil
 import tempfile
@@ -8,7 +7,6 @@ from unittest import mock
 
 import auto_fastq_symlink.core as core
 
-logging.disable(logging.CRITICAL)
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 SAMPLESHEETS_DIR = os.path.join(THIS_DIR, "data", "samplesheets")
@@ -99,8 +97,7 @@ class TestCore(unittest.TestCase):
 
     def _scan_and_symlink(self):
         for run in core.scan(self.config):
-            if run is not None:
-                core.symlink_run(self.config, run)
+            core.symlink_run(self.config, run)
 
     def _run_symlinks_dir(self, project_id, run_id):
         return os.path.join(self.config['projects'][project_id]['fastq_symlinks_dir'], run_id)
@@ -304,6 +301,43 @@ class TestCore(unittest.TestCase):
             {'LIB-A_R1.fastq.gz', 'LIB-A_R2.fastq.gz', 'symlinks_complete.json'},
             set(os.listdir(self._run_symlinks_dir('routine_testing', MISEQ_RUN_ID))),
         )
+
+    def test_problem_with_one_run_does_not_stop_others(self):
+        libraries = [('LIB-A', 'routine_testing')]
+        self._create_miseq_run(libraries)
+        self._add_miseq_alignment(os.path.join(self.runs_dir, MISEQ_RUN_ID), 1, '20220603_101010', libraries)
+        other_run_ids = ['220603_M00123_0301_000000000-Q5540', '220604_M00123_0302_000000000-Q5541']
+        for run_id in other_run_ids:
+            os.makedirs(os.path.join(self.runs_dir, run_id))
+        real_load_run = core._load_run
+
+        def failing_load_run(config, run_dir_path):
+            if os.path.basename(run_dir_path) == other_run_ids[0]:
+                raise PermissionError('denied')
+            if os.path.basename(run_dir_path) == other_run_ids[1]:
+                raise KeyError('unexpected')
+            return real_load_run(config, run_dir_path)
+
+        with mock.patch('auto_fastq_symlink.core._load_run', side_effect=failing_load_run):
+            with self.assertLogs('auto_fastq_symlink.core', level='ERROR') as logs:
+                runs = list(core.find_runs(self.config))
+
+        self.assertEqual([MISEQ_RUN_ID], [run['run_id'] for run in runs])
+        failures = {record.msg['sequencing_run_id']: record for record in logs.records if record.msg['event_type'] == 'load_run_failed'}
+        self.assertIsNone(failures[other_run_ids[0]].exc_info)
+        self.assertIsNotNone(failures[other_run_ids[1]].exc_info)
+
+    def test_unreadable_run_parent_dir_skipped(self):
+        libraries = [('LIB-A', 'routine_testing')]
+        self._create_miseq_run(libraries)
+        self._add_miseq_alignment(os.path.join(self.runs_dir, MISEQ_RUN_ID), 1, '20220603_101010', libraries)
+        self.config['run_parent_dirs'] = [os.path.join(self.tmp_dir, 'missing'), self.runs_dir]
+
+        with self.assertLogs('auto_fastq_symlink.core', level='ERROR') as logs:
+            runs = list(core.find_runs(self.config))
+
+        self.assertEqual([MISEQ_RUN_ID], [run['run_id'] for run in runs])
+        self.assertEqual('failed_to_scan_run_parent_dir', logs.records[0].msg['event_type'])
 
     def test_incomplete_tmp_dir_replaced(self):
         libraries = [('LIB-A', 'routine_testing')]

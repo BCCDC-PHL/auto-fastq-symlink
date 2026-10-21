@@ -10,6 +10,8 @@ import jsonschema
 
 import auto_fastq_symlink.util as util
 
+log = logging.getLogger(__name__)
+
 
 def _parse_header_section_miseq_v1(samplesheet_path):
     header_lines = []
@@ -148,7 +150,7 @@ def _parse_samplesheet_miseq_v1(samplesheet_path: str) -> dict[str, object]:
     try:
         jsonschema.validate(instance=samplesheet, schema=schema)
     except jsonschema.ValidationError as e:
-        logging.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
+        log.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
         raise e
 
     return samplesheet
@@ -369,7 +371,7 @@ def _parse_samplesheet_nextseq_v1(samplesheet_path):
     try:
         jsonschema.validate(instance=samplesheet, schema=schema)
     except jsonschema.ValidationError as e:
-        logging.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
+        log.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
         raise e
 
     return samplesheet
