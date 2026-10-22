@@ -10,6 +10,8 @@ import jsonschema
 
 import auto_fastq_symlink.samplesheet as ss
 
+log = logging.getLogger(__name__)
+
 
 def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Optional[dict[str, str]]:
     """
@@ -205,13 +207,13 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     # Short-circuit and return an empty list.
     fastq_dir = None
     if 'fastq_directory' not in run or not run['fastq_directory']:
-        logging.error(json.dumps({"event_type": "find_libraries_failed", "sequencing_run_id": run_id}))
+        log.error({"event_type": "find_libraries_failed", "sequencing_run_id": run_id})
         return libraries
     else:
         fastq_dir = run['fastq_directory']
 
     if not os.path.exists(fastq_dir):
-        logging.error(json.dumps({"event_type": "find_libraries_failed", "sequencing_run_id": run_id}))
+        log.error({"event_type": "find_libraries_failed", "sequencing_run_id": run_id})
         return libraries
 
     libraries_section = _determine_libraries_section(samplesheet, run['instrument_type'])
@@ -227,7 +229,7 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     for item in samplesheet[libraries_section]:
         required_item_keys = [project_header, library_id_header]
         if not all([k in item for k in required_item_keys]):
-            logging.warning(json.dumps({"event_type": "library_missing_required_fields", "required_fields": required_item_keys, "library": item}))
+            log.warning({"event_type": "library_missing_required_fields", "required_fields": required_item_keys, "library": item})
             continue
         library = {}
         library_id = _sanitize_library_id(item[library_id_header])
@@ -236,28 +238,28 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
             continue
         library['library_id'] = library_id
         library['project_id'] = project_id
-        logging.debug(json.dumps({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id}))
+        log.debug({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id})
         r1_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+(_L\\d{3})?' + '_R1_' + '\\d{3}', x), run_fastq_files))
         if len(r1_fastq_filenames) > 0:
             r1_fastq_filename = r1_fastq_filenames[0]
         else:
-            logging.debug(json.dumps({"event_type": "failed_to_find_R1_fastq", "sequencing_run_id": run_id, "library_id": library_id, "samplesheet_project_id": project_id}))
+            log.debug({"event_type": "failed_to_find_R1_fastq", "sequencing_run_id": run_id, "library_id": library_id, "samplesheet_project_id": project_id})
             r1_fastq_filename = None
         r2_fastq_filenames = list(filter(lambda x: re.match(library_id + '_S\\d+(_L\\d{3})?' + '_R2_' + '\\d{3}', x), run_fastq_files))
         if len(r2_fastq_filenames) > 0:
             r2_fastq_filename = r2_fastq_filenames[0]
         else:
-            logging.debug(json.dumps({"event_type": "failed_to_find_R2_fastq", "sequencing_run_id": run_id, "library_id": library_id, "samplesheet_project_id": project_id}))
+            log.debug({"event_type": "failed_to_find_R2_fastq", "sequencing_run_id": run_id, "library_id": library_id, "samplesheet_project_id": project_id})
             r2_fastq_filename = None
         r1_fastq_path = os.path.join(fastq_dir, r1_fastq_filename) if r1_fastq_filename else None
         r2_fastq_path = os.path.join(fastq_dir, r2_fastq_filename) if r2_fastq_filename else None
         if r1_fastq_path and os.path.exists(r1_fastq_path):
-            logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R1", "fastq_path": r1_fastq_path}))
+            log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R1", "fastq_path": r1_fastq_path})
             library['fastq_path_r1'] = r1_fastq_path
         else:
             library['fastq_path_r1'] = None
         if r2_fastq_path and os.path.exists(r2_fastq_path):
-            logging.debug(json.dumps({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R2", "fastq_path": r2_fastq_path}))
+            log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R2", "fastq_path": r2_fastq_path})
             library['fastq_path_r2'] = r2_fastq_path
         else:
             library['fastq_path_r2'] = None
@@ -268,101 +270,130 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     return libraries
     
 
-def find_runs(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]]:
+MISEQ_RUN_ID_REGEX = "\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"
+NEXTSEQ_RUN_ID_REGEX = "\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"
+
+
+def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str, object]]:
     """
-    Find all sequencing runs under all of the `run_parent_dirs` from the config.
-    Runs are found by matching sub-directory names against the following regexes: `"\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"` (MiSeq) and `"\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"` (NextSeq)
+    Load a sequencing run, if it is ready to be symlinked. A run is ready once it has been uploaded and has passed its QC check.
 
     :param config: Application config.
     :type config: dict[str, object]
-    :return: Dictionary of sequencin run info, indexed by sequencing run ID.
+    :param run_dir_path: Path to the (possible) sequencing run directory.
+    :type run_dir_path: str
+    :return: Sequencing run info, including its libraries, or None if the directory isn't a run that is ready to be symlinked.
+    :rtype: dict[str, object] | None
+    """
+    run_id = os.path.basename(run_dir_path)
+    instrument_type = None
+    if re.match(MISEQ_RUN_ID_REGEX, run_id):
+        instrument_type = "miseq"
+    elif re.match(NEXTSEQ_RUN_ID_REGEX, run_id):
+        instrument_type = "nextseq"
+
+    qc_check_complete_path = os.path.join(run_dir_path, "qc_check_complete.json")
+    qc_check_complete_file_exists = os.path.exists(qc_check_complete_path)
+    passed_run_qc_check = False
+    if qc_check_complete_file_exists:
+        try:
+            with open(qc_check_complete_path) as f:
+                qc_check = json.load(f)
+        except json.decoder.JSONDecodeError as e:
+            log.error({"event_type": "qc_check_json_decode_error", "sequencing_run_id": run_id, "error": str(e)})
+            qc_check = {}
+        overall_pass_fail = qc_check.get('overall_pass_fail', None)
+        if overall_pass_fail is not None and re.match("PASS", overall_pass_fail, re.IGNORECASE):
+            passed_run_qc_check = True
+
+    conditions_checked = {
+        'subdir_is_directory': os.path.isdir(run_dir_path),
+        'upload_complete': os.path.exists(os.path.join(run_dir_path, "upload_complete.json")),
+        'qc_check_complete': qc_check_complete_file_exists,
+        'passed_run_qc_check': passed_run_qc_check,
+        'determined_instrument_type': instrument_type is not None,
+    }
+    if not all(conditions_checked.values()):
+        log.info({"event_type": "skipped_run", "sequencing_run_id": run_id, "conditions_checked": conditions_checked})
+        return None
+
+    log.info({"event_type": "scan_run_start", "sequencing_run_id": run_id})
+    latest_demultiplexing = _find_latest_demultiplexing(run_dir_path, instrument_type)
+    if latest_demultiplexing is None:
+        log.warning({"event_type": "demultiplexing_output_not_found", "sequencing_run_id": run_id})
+        return None
+
+    log.debug({"event_type": "sequencing_run_found", "sequencing_run_id": run_id})
+    run = {
+        "run_id": run_id,
+        "instrument_type": instrument_type,
+        "run_directory": run_dir_path,
+        "fastq_directory": latest_demultiplexing['fastq_directory'],
+    }
+    samplesheet_to_parse = _find_samplesheet(run_dir_path, latest_demultiplexing['output_directory'], instrument_type)
+    if samplesheet_to_parse:
+        log.debug({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse})
+    else:
+        log.error({"event_type": "samplesheet_not_found", "sequencing_run_id": run_id, "demultiplexing_output_directory": latest_demultiplexing['output_directory']})
+        return None
+
+    run['samplesheet'] = samplesheet_to_parse
+    try:
+        samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
+    except jsonschema.ValidationError:
+        # Already logged by the samplesheet parser.
+        return None
+
+    libraries = find_libraries(run, samplesheet, config['fastq_extensions'])
+    for library in libraries:
+        if library['project_id'] in config['project_id_translation']:
+            samplesheet_project_id = library['project_id']
+            symlinking_project_id = config['project_id_translation'][samplesheet_project_id]
+            library['project_id'] = symlinking_project_id
+        elif library['project_id'] == '':
+            library['project_id'] = None
+    run['libraries'] = libraries
+
+    return run
+
+
+def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
+    """
+    Find all sequencing runs under all of the `run_parent_dirs` from the config that are ready to be symlinked.
+    Runs are found by matching sub-directory names against `MISEQ_RUN_ID_REGEX` and `NEXTSEQ_RUN_ID_REGEX`.
+
+    A problem with one run directory (or one run parent dir) is logged, and doesn't stop other runs from being found.
+    The run will be tried again on the next scan.
+
+    :param config: Application config.
+    :type config: dict[str, object]
+    :return: Sequencing runs that are ready to be symlinked.
     :rtype: Iterable[dict[str, object]]
     """
-    run = {}
-    miseq_run_id_regex = "\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"
-    nextseq_run_id_regex = "\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"
-    run_parent_dirs = config['run_parent_dirs']
-    fastq_extensions = config['fastq_extensions']
-    for run_parent_dir in run_parent_dirs:
-        if not os.path.exists(run_parent_dir):
-            logging.warning(json.dumps({"event_type": "run_parent_dir_does_not_exist", "run_parent_dir": run_parent_dir}))
+    for run_parent_dir in config['run_parent_dirs']:
+        try:
+            subdirs = list(os.scandir(run_parent_dir))
+        except OSError as e:
+            # Parent dirs may be on network storage that's temporarily unavailable.
+            # Skip it for this scan, and try again on the next one.
+            log.error({"event_type": "failed_to_scan_run_parent_dir", "run_parent_dir": run_parent_dir, "error": str(e)})
             continue
-        subdirs = os.scandir(run_parent_dir)
+
         for subdir in subdirs:
-            run = {}
-            instrument_type = None
-            run_id = subdir.name
-            if re.match(miseq_run_id_regex, run_id):
-                instrument_type = "miseq"
-            elif re.match(nextseq_run_id_regex, run_id):
-                instrument_type = "nextseq"
+            try:
+                run = _load_run(config, subdir.path)
+            except OSError as e:
+                # Expected, environmental problems (missing files, permissions, network storage).
+                # The message says what went wrong, so a traceback wouldn't add anything.
+                log.error({"event_type": "load_run_failed", "sequencing_run_id": subdir.name, "error_type": type(e).__name__, "error": str(e)})
+                continue
+            except Exception as e:
+                # Unexpected problems are probably bugs, so include the traceback.
+                log.error({"event_type": "load_run_failed", "sequencing_run_id": subdir.name, "error_type": type(e).__name__, "error": str(e)}, exc_info=True)
+                continue
 
-            subdir_is_dir = os.path.isdir(subdir.path)
-            upload_complete_file_exists = os.path.exists(os.path.join(subdir.path, "upload_complete.json"))
-            qc_check_complete_file_exists = os.path.exists(os.path.join(subdir.path, "qc_check_complete.json"))
-            determined_instrument_type = instrument_type != None
-
-            passed_run_qc_check = False
-            if qc_check_complete_file_exists:
-                try:
-                    with open(os.path.join(subdir.path, "qc_check_complete.json")) as f:
-                        qc_check = json.load(f)
-                except json.decoder.JSONDecodeError as e:
-                    logging.error(json.dumps({"event_type": "qc_check_json_decode_error", "sequencing_run_id": run_id, "error": str(e)}))
-                    qc_check = {}
-                overall_pass_fail = qc_check.get('overall_pass_fail', None)
-                if overall_pass_fail is not None and re.match("PASS", overall_pass_fail, re.IGNORECASE):
-                    passed_run_qc_check = True
-
-            conditions_checked = {
-                'subdir_is_directory': subdir_is_dir,
-                'upload_complete': upload_complete_file_exists,
-                'qc_check_complete': qc_check_complete_file_exists,
-                'passed_run_qc_check': passed_run_qc_check,
-                'determined_instrument_type': determined_instrument_type,
-            }
-            conditions_met = [v for k, v in conditions_checked.items()]
-            if not all(conditions_met):
-                logging.info(json.dumps({"event_type": "skipped_run", "sequencing_run_id": run_id, "conditions_checked": conditions_checked}))
-                yield None
-
-            if all(conditions_met):
-                logging.info(json.dumps({"event_type": "scan_run_start", "sequencing_run_id": run_id}))
-                latest_demultiplexing = _find_latest_demultiplexing(subdir.path, instrument_type)
-                if latest_demultiplexing is None:
-                    logging.warning(json.dumps({"event_type": "demultiplexing_output_not_found", "sequencing_run_id": run_id}))
-                else:
-                    logging.debug(json.dumps({"event_type": "sequencing_run_found", "sequencing_run_id": run_id}))
-                    run = {
-                        "run_id": run_id,
-                        "instrument_type": instrument_type,
-                        "run_directory": subdir.path,
-                        "fastq_directory": latest_demultiplexing['fastq_directory'],
-                    }
-                    samplesheet_to_parse = _find_samplesheet(subdir.path, latest_demultiplexing['output_directory'], instrument_type)
-                    if samplesheet_to_parse:
-                        logging.debug(json.dumps({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse}))
-                    else:
-                        logging.error(json.dumps({"event_type": "samplesheet_not_found", "sequencing_run_id": run_id, "demultiplexing_output_directory": latest_demultiplexing['output_directory']}))
-                        run['libraries'] = []
-                        continue
-
-                    run['samplesheet'] = samplesheet_to_parse
-                    try:
-                        samplesheet = ss.parse_samplesheet(samplesheet_to_parse, run['instrument_type'])
-                        libraries = find_libraries(run, samplesheet, fastq_extensions)
-                        for library in libraries:
-                            if library['project_id'] in config['project_id_translation']:
-                                samplesheet_project_id = library['project_id']
-                                symlinking_project_id = config['project_id_translation'][samplesheet_project_id]
-                                library['project_id'] = symlinking_project_id
-                            elif library['project_id'] == '':
-                                library['project_id'] = None
-                        run['libraries'] = libraries
-                        yield run
-                    except jsonschema.ValidationError as e:
-                        yield None
-                    
+            if run is not None:
+                yield run
 
 
 def _symlink_filename(target: str, simplify_symlink_filenames: bool) -> str:
@@ -408,7 +439,7 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run: dict[st
     :rtype: dict[str, list[dict[str, str]]]
     """
     run_id = run['run_id']
-    logging.debug(json.dumps({"event_type": "determine_symlinks_for_run_start", "sequencing_run_id": run_id}))
+    log.debug({"event_type": "determine_symlinks_for_run_start", "sequencing_run_id": run_id})
     symlinks_to_create_by_project_id = {}
 
     for project_id, project in config['projects'].items():
@@ -427,9 +458,9 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run: dict[st
             if not os.path.exists(os.path.join(run_symlinks_dir, 'symlinks_complete.json')):
                 # Most likely the application was interrupted between creating the directory and writing
                 # symlinks_complete.json. Leave it alone, but make it visible. Delete the directory to re-generate it.
-                logging.warning(json.dumps({"event_type": "run_symlinks_dir_missing_symlinks_complete", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir}))
+                log.warning({"event_type": "run_symlinks_dir_missing_symlinks_complete", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir})
             else:
-                logging.debug(json.dumps({"event_type": "run_symlinks_dir_already_exists", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir}))
+                log.debug({"event_type": "run_symlinks_dir_already_exists", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir})
             continue
 
         symlinks = []
@@ -439,7 +470,7 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run: dict[st
                 # Defend against cases where symlink target is None
                 # See https://github.com/BCCDC-PHL/auto-fastq-symlink/issues/18
                 if target is None:
-                    logging.warning(json.dumps({"event_type": "fastq_file_not_found", "sequencing_run_id": run_id, "project_id": project_id, "library_id": library['library_id'], "read_type": read_type}))
+                    log.warning({"event_type": "fastq_file_not_found", "sequencing_run_id": run_id, "project_id": project_id, "library_id": library['library_id'], "read_type": read_type})
                     continue
                 symlinks.append({
                     'target': target,
@@ -450,12 +481,12 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run: dict[st
             symlinks_to_create_by_project_id[project_id] = symlinks
 
     num_symlinks_to_create_by_project_id = {project_id: len(symlinks) for project_id, symlinks in symlinks_to_create_by_project_id.items()}
-    logging.debug(json.dumps({
+    log.debug({
         "event_type": "determine_symlinks_for_run_complete",
         "sequencing_run_id": run_id,
         "total_num_symlinks_to_create": sum(num_symlinks_to_create_by_project_id.values()),
         "num_symlinks_to_create_by_project_id": num_symlinks_to_create_by_project_id,
-    }))
+    })
 
     return symlinks_to_create_by_project_id
 
@@ -479,7 +510,7 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
     :return: Dictionary of symlinks created by project ID.
     :rtype: dict[str, list[dict[str, str]]]
     """
-    logging.debug(json.dumps({"event_type": "create_symlinks_start", "sequencing_run_id": run_id}))
+    log.debug({"event_type": "create_symlinks_start", "sequencing_run_id": run_id})
     symlinks_complete_by_project_id = {}
     for project_id, symlinks in symlinks_to_create_by_project_id.items():
         project_fastq_symlinks_dir = config['projects'][project_id]['fastq_symlinks_dir']
@@ -487,7 +518,7 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
         tmp_run_symlinks_dir = os.path.join(project_fastq_symlinks_dir, '.' + run_id + '.tmp')
 
         if os.path.lexists(tmp_run_symlinks_dir):
-            logging.warning(json.dumps({"event_type": "removing_incomplete_run_symlinks_dir", "sequencing_run_id": run_id, "project_id": project_id, "path": tmp_run_symlinks_dir}))
+            log.warning({"event_type": "removing_incomplete_run_symlinks_dir", "sequencing_run_id": run_id, "project_id": project_id, "path": tmp_run_symlinks_dir})
             shutil.rmtree(tmp_run_symlinks_dir)
         os.makedirs(tmp_run_symlinks_dir)
 
@@ -503,7 +534,7 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
             os.rename(tmp_run_symlinks_dir, run_symlinks_dir)
         except OSError as e:
             # The run symlinks dir was created by something else since we checked for it. Leave it alone.
-            logging.error(json.dumps({"event_type": "rename_run_symlinks_dir_failed", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir, "error": str(e)}))
+            log.error({"event_type": "rename_run_symlinks_dir_failed", "sequencing_run_id": run_id, "project_id": project_id, "run_symlinks_dir": run_symlinks_dir, "error": str(e)})
             shutil.rmtree(tmp_run_symlinks_dir)
             continue
 
@@ -521,24 +552,23 @@ def create_symlinks(config: dict[str, object], symlinks_to_create_by_project_id:
     return symlinks_complete_by_project_id
 
 
-def scan(config: dict[str, object]) -> Iterable[Optional[dict[str, object]]]:
+def scan(config: dict[str, object]) -> Iterable[dict[str, object]]:
     """
     Scan for all sequencing runs. Each run is yielded as it is found, so that it can be symlinked
     before the scan continues.
 
     :param config: Application config.
     :type config: dict[str, object]
-    :return: Sequencing runs (or None for runs that were skipped)
-    :rtype: Iterable[Optional[dict[str, object]]]
+    :return: Sequencing runs that are ready to be symlinked.
+    :rtype: Iterable[dict[str, object]]
     """
-    logging.info(json.dumps({"event_type": "scan_start"}))
+    log.info({"event_type": "scan_start"})
     num_runs_found = 0
     for run in find_runs(config):
-        if run is not None:
-            num_runs_found += 1
+        num_runs_found += 1
         yield run
 
-    logging.info(json.dumps({"event_type": "find_runs_complete", "num_runs_found": num_runs_found}))
+    log.info({"event_type": "find_runs_complete", "num_runs_found": num_runs_found})
 
 
 def symlink_run(config: dict[str, object], run: dict[str, object]):
@@ -554,15 +584,15 @@ def symlink_run(config: dict[str, object], run: dict[str, object]):
     :rtype: NoneType
     """
     run_id = run['run_id']
-    logging.debug(json.dumps({"event_type": "symlink_run_start", "sequencing_run_id": run_id}))
+    log.debug({"event_type": "symlink_run_start", "sequencing_run_id": run_id})
 
     symlinks_to_create = determine_symlinks_to_create_for_run(config, run)
     symlinks_complete_by_project_id = create_symlinks(config, symlinks_to_create, run_id)
-    logging.debug(json.dumps({"event_type": "create_symlinks_complete", "sequencing_run_id": run_id}))
+    log.debug({"event_type": "create_symlinks_complete", "sequencing_run_id": run_id})
     num_symlinks_created_by_project_id = {project_id: len(symlinks) for project_id, symlinks in symlinks_complete_by_project_id.items()}
-    logging.info(json.dumps({
+    log.info({
         "event_type": "symlink_run_complete",
         "sequencing_run_id": run_id,
         "total_num_symlinks_created": sum(num_symlinks_created_by_project_id.values()),
         "num_symlinks_created_by_project_id": num_symlinks_created_by_project_id,
-    }))
+    })

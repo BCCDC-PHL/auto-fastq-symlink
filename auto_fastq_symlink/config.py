@@ -1,6 +1,5 @@
 import csv
 import json
-import logging
 
 def _parse_list(list_path: str) -> list[str]:
     """
@@ -70,54 +69,52 @@ def parse_project_id_translation_file(project_id_translation_file_path, projects
     return project_translation
 
 
+REQUIRED_CONFIG_KEYS = ['run_parent_dirs', 'projects_definition_file', 'fastq_extensions']
+
+
 def load_config(config_path: str) -> dict[str, object]:
     """
+    Load the application config, along with the projects definition file, project ID translation file
+    and exclusion lists that it refers to.
+
+    Raises if the config file (or a file it refers to) can't be loaded or is invalid. In particular, if an
+    exclusion list can't be loaded we shouldn't proceed with that config, or we might create symlinks
+    that shouldn't be created, which could have further effects downstream.
+
     :param config_path: Path to application config file (json format)
     :type config_path: str
     :return: Application config dictionary.
     :rtype: dict[str, object]
+    :raises OSError: If the config file, or a file it refers to, can't be read.
+    :raises ValueError: If the config file isn't valid JSON, or is missing required keys.
     """
-    config = None
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    if 'projects_definition_file' in config:
-        projects = parse_projects_definition_file(config['projects_definition_file'])
-        config['projects'] = projects
-        if 'project_id_translation_file' in config:
-            project_id_translation = parse_project_id_translation_file(config['project_id_translation_file'], config['projects'])
-            config['project_id_translation'] = project_id_translation
-        else:
-            config['project_id_translation'] = {}
-            
-        for project_id, project in projects.items():
-            if 'excluded_runs_list' in project:
-                try:
-                    excluded_runs_list = _parse_list(project['excluded_runs_list'])
-                except Exception as e:
-                    # If we can't load the excluded runs, we shouldn't proceed.
-                    # If we did, we might create symlinks that shouldn't be created,
-                    # which could have further effects downstream
-                    logging.error("Error loading excluded runs list: " + project['excluded_runs_list'])
-                    exit(-1)
-                excluded_runs = set(excluded_runs_list)
-                config['projects'][project_id]['excluded_runs'] = excluded_runs
-            else:
-                config['projects'][project_id]['excluded_runs'] = set()
+    missing_keys = [k for k in REQUIRED_CONFIG_KEYS if k not in config]
+    if missing_keys:
+        raise ValueError(f"Config file {config_path} is missing required keys: {', '.join(missing_keys)}")
 
-            if 'excluded_libraries_list' in project:
-                try:
-                    excluded_libraries_list = _parse_list(project['excluded_libraries_list'])
-                except Exception as e:
-                    # If we can't load the excluded libraries, we shouldn't proceed.
-                    # If we did, we might create symlinks that shouldn't be created,
-                    # which could have further effects downstream
-                    logging.error("Error loading excluded libraries list: " + project['excluded_libraries_list'])
-                    exit(-1)
-                excluded_libraries = set(excluded_libraries_list)
-                config['projects'][project_id]['excluded_libraries'] = excluded_libraries
-            else:
-                config['projects'][project_id]['excluded_libraries'] = set()
+    if 'scan_interval_seconds' in config:
+        config['scan_interval_seconds'] = float(config['scan_interval_seconds'])
+
+    projects = parse_projects_definition_file(config['projects_definition_file'])
+    config['projects'] = projects
+    if 'project_id_translation_file' in config:
+        config['project_id_translation'] = parse_project_id_translation_file(config['project_id_translation_file'], projects)
+    else:
+        config['project_id_translation'] = {}
+
+    for project_id, project in projects.items():
+        if 'excluded_runs_list' in project:
+            project['excluded_runs'] = set(_parse_list(project['excluded_runs_list']))
+        else:
+            project['excluded_runs'] = set()
+
+        if 'excluded_libraries_list' in project:
+            project['excluded_libraries'] = set(_parse_list(project['excluded_libraries_list']))
+        else:
+            project['excluded_libraries'] = set()
 
     return config
 
