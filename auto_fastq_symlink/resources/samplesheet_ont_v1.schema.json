@@ -1,0 +1,24 @@
+{
+    "type": "object",
+    "required": ["data"],
+    "properties": {
+        "data": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/data_element" }
+        }
+    },
+    "$defs": {
+        "data_element": {
+            "type": "object",
+            "required": ["alias"],
+            "properties": {
+                "alias": {
+                    "type": "string"
+                },
+                "barcode": {
+                    "type": ["string", "null"]
+                }
+            }
+        }
+    }
+}
