@@ -13,34 +13,75 @@ import auto_fastq_symlink.samplesheet as ss
 log = logging.getLogger(__name__)
 
 
-def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Optional[dict[str, str]]:
+def _subdir_names(dir_path: str) -> list[str]:
     """
-    Find the output of the latest demultiplexing for a run. A run may have been demultiplexed
-    more than once, in which case each demultiplexing has its own numbered output directory.
+    :param dir_path: Path to a directory.
+    :type dir_path: str
+    :return: Names of the sub-directories of the directory.
+    :rtype: list[str]
+    """
+    return [entry.name for entry in os.scandir(dir_path) if entry.is_dir()]
 
-    Old (v1) MiSeq directory structure: Data/Intensities/BaseCalls (only one demultiplexing; SampleSheet at the top level of the run dir)
-    New (v2) MiSeq directory structure: like: Alignment_1/20220619_120702/Fastq (SampleSheet in Alignment_1/20220619_120702/SampleSheetUsed.csv)
-    NextSeq directory structure: like: Analysis/1/Data/fastq
+
+def _find_latest_analysis_dir(run_dir_path: str) -> Optional[str]:
+    """
+    NextSeq and MiSeq i100 runs have a numbered `Analysis/<N>` directory for each demultiplexing.
+    Find the one with the highest number.
 
     :param run_dir_path: Path to the sequencing run directory.
     :type run_dir_path: str
-    :param instrument_type: Instrument type ('miseq' or 'nextseq')
-    :type instrument_type: str
-    :return: Dict with keys 'output_directory' (where the SampleSheet for the demultiplexing should be) and 'fastq_directory', or None if it can't be found.
-    :rtype: dict[str, str] | None
+    :return: Path to the latest analysis directory, or None if there isn't one.
+    :rtype: str | None
     """
-    subdir_names = lambda path: [entry.name for entry in os.scandir(path) if entry.is_dir()]
+    analysis_dir_path = os.path.join(run_dir_path, "Analysis")
+    if not os.path.isdir(analysis_dir_path):
+        return None
+    analysis_subdir_nums = [int(name) for name in _subdir_names(analysis_dir_path) if re.fullmatch("\\d+", name)]
+    if len(analysis_subdir_nums) == 0:
+        return None
+
+    return os.path.join(analysis_dir_path, str(max(analysis_subdir_nums)))
+
+
+def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Optional[dict[str, Optional[str]]]:
+    """
+    Find the output of the latest demultiplexing for a run. A run may have been demultiplexed
+    more than once, in which case each demultiplexing has its own numbered output directory,
+    with its own SampleSheet.
+
+    Only the SampleSheet for the demultiplexing is used. There's no fall-back to the SampleSheet at the
+    top level of the run directory, because it may not match the latest demultiplexing.
+
+    | Directory structure | Fastq directory                         | SampleSheet                                 |
+    |---------------------|-----------------------------------------|---------------------------------------------|
+    | MiSeq (old)         | `Data/Intensities/BaseCalls`            | `SampleSheet*.csv` at the top level         |
+    | MiSeq (new)         | `Alignment_<N>/<timestamp>/Fastq`       | `Alignment_<N>/<timestamp>/SampleSheetUsed.csv` |
+    | NextSeq             | `Analysis/<N>/Data/fastq`               | `Analysis/<N>/Data/SampleSheet*.csv`        |
+    | MiSeq i100          | `Analysis/<N>/Data/BCLConvert/fastq`    | `Analysis/<N>/inputs/SampleSheet*.csv`      |
+
+    The old MiSeq directory structure only supports one demultiplexing, so its SampleSheet is at the top level of the run directory.
+
+    :param run_dir_path: Path to the sequencing run directory.
+    :type run_dir_path: str
+    :param instrument_type: Instrument type ('miseq', 'nextseq' or 'i100')
+    :type instrument_type: str
+    :return: Dict with keys 'output_directory', 'fastq_directory' and 'samplesheet_path' (which is None if the SampleSheet can't be found), or None if the demultiplexing output can't be found.
+    :rtype: dict[str, str | None] | None
+    """
+    find_samplesheet = lambda dir_path: ss.choose_samplesheet_to_parse(ss.find_samplesheets(dir_path))
     latest_demultiplexing = None
     if instrument_type == 'miseq':
-        alignment_subdir_nums = [int(name.split('_')[1]) for name in subdir_names(run_dir_path) if re.fullmatch("Alignment_\\d+", name)]
+        alignment_subdir_nums = [int(name.split('_')[1]) for name in _subdir_names(run_dir_path) if re.fullmatch("Alignment_\\d+", name)]
         if len(alignment_subdir_nums) > 0:
             alignment_directory = os.path.join(run_dir_path, "Alignment_" + str(max(alignment_subdir_nums)))
-            alignment_subdirs = sorted(subdir_names(alignment_directory), reverse=True)
+            alignment_subdirs = sorted(_subdir_names(alignment_directory), reverse=True)
             if len(alignment_subdirs) > 0:
                 output_directory = os.path.join(alignment_directory, alignment_subdirs[0])
+                samplesheet_used_path = os.path.join(output_directory, "SampleSheetUsed.csv")
                 latest_demultiplexing = {
                     'output_directory': output_directory,
                     'fastq_directory': os.path.join(output_directory, "Fastq"),
+                    'samplesheet_path': samplesheet_used_path if os.path.isfile(samplesheet_used_path) else None,
                 }
         else:
             data_intensities_basecalls_dir_path = os.path.join(run_dir_path, "Data", "Intensities", "BaseCalls")
@@ -48,49 +89,28 @@ def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Opti
                 latest_demultiplexing = {
                     'output_directory': run_dir_path,
                     'fastq_directory': data_intensities_basecalls_dir_path,
+                    'samplesheet_path': find_samplesheet(run_dir_path),
                 }
 
     elif instrument_type == 'nextseq':
-        analysis_dir_path = os.path.join(run_dir_path, "Analysis")
-        if os.path.isdir(analysis_dir_path):
-            analysis_subdir_nums = [int(name) for name in subdir_names(analysis_dir_path) if re.fullmatch("\\d+", name)]
-            if len(analysis_subdir_nums) > 0:
-                output_directory = os.path.join(analysis_dir_path, str(max(analysis_subdir_nums)), "Data")
-                latest_demultiplexing = {
-                    'output_directory': output_directory,
-                    'fastq_directory': os.path.join(output_directory, "fastq"),
-                }
+        analysis_dir_path = _find_latest_analysis_dir(run_dir_path)
+        if analysis_dir_path is not None:
+            latest_demultiplexing = {
+                'output_directory': analysis_dir_path,
+                'fastq_directory': os.path.join(analysis_dir_path, "Data", "fastq"),
+                'samplesheet_path': find_samplesheet(os.path.join(analysis_dir_path, "Data")),
+            }
+
+    elif instrument_type == 'i100':
+        analysis_dir_path = _find_latest_analysis_dir(run_dir_path)
+        if analysis_dir_path is not None:
+            latest_demultiplexing = {
+                'output_directory': analysis_dir_path,
+                'fastq_directory': os.path.join(analysis_dir_path, "Data", "BCLConvert", "fastq"),
+                'samplesheet_path': find_samplesheet(os.path.join(analysis_dir_path, "inputs")),
+            }
 
     return latest_demultiplexing
-
-
-def _find_samplesheet(run_dir_path: str, demultiplexing_output_dir_path: str, instrument_type: str) -> Optional[str]:
-    """
-    Find the SampleSheet to use for a demultiplexing. A SampleSheet in the demultiplexing output
-    directory is preferred. If there isn't one, fall back to the SampleSheet at the top level of the run directory.
-
-    For MiSeq runs with the new (v2) directory structure, the SampleSheet in the demultiplexing output
-    directory (`Alignment_N/<timestamp>`) is always named `SampleSheetUsed.csv`, so only that file is considered there.
-
-    :param run_dir_path: Path to the sequencing run directory.
-    :type run_dir_path: str
-    :param demultiplexing_output_dir_path: Path to the demultiplexing output directory.
-    :type demultiplexing_output_dir_path: str
-    :param instrument_type: Instrument type ('miseq' or 'nextseq')
-    :type instrument_type: str
-    :return: Path to the SampleSheet, or None if it can't be found.
-    :rtype: str | None
-    """
-    output_dir_is_run_dir = os.path.abspath(demultiplexing_output_dir_path) == os.path.abspath(run_dir_path)
-    if instrument_type == 'miseq' and not output_dir_is_run_dir:
-        samplesheet_used_path = os.path.join(demultiplexing_output_dir_path, "SampleSheetUsed.csv")
-        samplesheet_path = samplesheet_used_path if os.path.isfile(samplesheet_used_path) else None
-    else:
-        samplesheet_path = ss.choose_samplesheet_to_parse(ss.find_samplesheets(demultiplexing_output_dir_path))
-    if samplesheet_path is None and not output_dir_is_run_dir:
-        samplesheet_path = ss.choose_samplesheet_to_parse(ss.find_samplesheets(run_dir_path))
-
-    return samplesheet_path
 
 
 def _determine_libraries_section(samplesheet, instrument_type):
@@ -99,14 +119,14 @@ def _determine_libraries_section(samplesheet, instrument_type):
 
     :param samplesheet: The parsed SampleSheet.
     :type samplesheet: dict[str, object]
-    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :param instrument_type: Instrument type ('miseq', 'nextseq' or 'i100')
     :type instrument_type: str
     :return: The section of the SampleSheet that contains the library info.
     :rtype: str | None
     """
     if instrument_type == 'miseq':
         libraries_section = 'data'
-    elif instrument_type == 'nextseq':
+    elif instrument_type in ('nextseq', 'i100'):
         libraries_section = 'cloud_data'
     else:
         libraries_section = None
@@ -120,14 +140,14 @@ def _determine_project_header(samplesheet, instrument_type):
 
     :param samplesheet: The parsed SampleSheet.
     :type samplesheet: dict[str, object]
-    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :param instrument_type: Instrument type ('miseq', 'nextseq' or 'i100')
     :type instrument_type: str
     :return: The header of the field that contains the project ID.
     :rtype: str | None
     """
     if instrument_type == 'miseq':
         project_header = 'sample_project'
-    elif instrument_type == 'nextseq':
+    elif instrument_type in ('nextseq', 'i100'):
         project_header = 'project_name'
     else:
         project_header = None
@@ -145,7 +165,7 @@ def _determine_library_id_header(samplesheet, instrument_type):
 
     :param samplesheet: The parsed SampleSheet.
     :type samplesheet: dict[str, object]
-    :param instrument_type: Instrument type ('miseq' or 'nextseq')
+    :param instrument_type: Instrument type ('miseq', 'nextseq' or 'i100')
     :type instrument_type: str
     :return: The header of the field that contains the library ID.
     :rtype: str | None
@@ -160,7 +180,7 @@ def _determine_library_id_header(samplesheet, instrument_type):
             library_id_header = 'sample_name'
         else:
             library_id_header = 'sample_id'
-    elif instrument_type == 'nextseq':
+    elif instrument_type in ('nextseq', 'i100'):
         library_id_header = 'sample_id'
     else:
         library_id_header = None
@@ -272,6 +292,7 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
 
 MISEQ_RUN_ID_REGEX = "\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"
 NEXTSEQ_RUN_ID_REGEX = "\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"
+I100_RUN_ID_REGEX = "\\d{8}_SH\\d{5}_\\d+_[A-Z0-9]{10}-[A-Z0-9]{3}"
 
 
 def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str, object]]:
@@ -291,6 +312,8 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
         instrument_type = "miseq"
     elif re.match(NEXTSEQ_RUN_ID_REGEX, run_id):
         instrument_type = "nextseq"
+    elif re.match(I100_RUN_ID_REGEX, run_id):
+        instrument_type = "i100"
 
     qc_check_complete_path = os.path.join(run_dir_path, "qc_check_complete.json")
     qc_check_complete_file_exists = os.path.exists(qc_check_complete_path)
@@ -330,7 +353,7 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
         "run_directory": run_dir_path,
         "fastq_directory": latest_demultiplexing['fastq_directory'],
     }
-    samplesheet_to_parse = _find_samplesheet(run_dir_path, latest_demultiplexing['output_directory'], instrument_type)
+    samplesheet_to_parse = latest_demultiplexing['samplesheet_path']
     if samplesheet_to_parse:
         log.debug({"event_type": "samplesheet_found", "sequencing_run_id": run_id, "samplesheet_path": samplesheet_to_parse})
     else:
@@ -360,7 +383,7 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
 def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
     """
     Find all sequencing runs under all of the `run_parent_dirs` from the config that are ready to be symlinked.
-    Runs are found by matching sub-directory names against `MISEQ_RUN_ID_REGEX` and `NEXTSEQ_RUN_ID_REGEX`.
+    Runs are found by matching sub-directory names against `MISEQ_RUN_ID_REGEX`, `NEXTSEQ_RUN_ID_REGEX` and `I100_RUN_ID_REGEX`.
 
     A problem with one run directory (or one run parent dir) is logged, and doesn't stop other runs from being found.
     The run will be tried again on the next scan.
