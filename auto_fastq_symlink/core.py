@@ -1,4 +1,5 @@
 import datetime
+import glob
 import json
 import logging
 import os
@@ -43,6 +44,37 @@ def _find_latest_analysis_dir(run_dir_path: str) -> Optional[str]:
     return os.path.join(analysis_dir_path, str(max(analysis_subdir_nums)))
 
 
+def _find_ont_samplesheet(run_dir_path: str) -> Optional[str]:
+    """
+    Find the sample sheet for an Oxford Nanopore run. It's at the top level of the run directory, and its name
+    is generated from the run ID. For run `20261015_1336_X2_FBG78506_b2f5b6a3`, it's
+    `sample_sheet_FBG78506_20261015_1336_b2f5b6a3.csv` (`sample_sheet_<flow_cell_id>_<date>_<time>_<run_hash>.csv`).
+
+    If there isn't a sample sheet with that name, but there is exactly one file named like `sample_sheet*.csv`,
+    that one is used (and a warning is logged). If there are several, we can't tell which is correct, so none is used.
+
+    :param run_dir_path: Path to the sequencing run directory.
+    :type run_dir_path: str
+    :return: Path to the sample sheet, or None if it can't be found.
+    :rtype: str | None
+    """
+    run_id = os.path.basename(run_dir_path)
+    run_id_parts = run_id.split('_')
+    expected_samplesheet_filename = "sample_sheet_" + "_".join([run_id_parts[-2], run_id_parts[0], run_id_parts[1], run_id_parts[-1]]) + ".csv"
+    expected_samplesheet_path = os.path.join(run_dir_path, expected_samplesheet_filename)
+    if os.path.isfile(expected_samplesheet_path):
+        return expected_samplesheet_path
+
+    samplesheet_paths = sorted(glob.glob(os.path.join(run_dir_path, "sample_sheet*.csv")))
+    if len(samplesheet_paths) == 1:
+        log.warning({"event_type": "using_samplesheet_with_unexpected_name", "sequencing_run_id": run_id, "expected_samplesheet_filename": expected_samplesheet_filename, "samplesheet_path": samplesheet_paths[0]})
+        return samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        log.error({"event_type": "multiple_samplesheets_found", "sequencing_run_id": run_id, "expected_samplesheet_filename": expected_samplesheet_filename, "samplesheet_paths": samplesheet_paths})
+
+    return None
+
+
 def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Optional[dict[str, Optional[str]]]:
     """
     Find the output of the latest demultiplexing for a run. A run may have been demultiplexed
@@ -58,12 +90,15 @@ def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Opti
     | MiSeq (new)         | `Alignment_<N>/<timestamp>/Fastq`       | `Alignment_<N>/<timestamp>/SampleSheetUsed.csv` |
     | NextSeq             | `Analysis/<N>/Data/fastq`               | `Analysis/<N>/Data/SampleSheet*.csv`        |
     | MiSeq i100          | `Analysis/<N>/Data/BCLConvert/fastq`    | `Analysis/<N>/inputs/SampleSheet*.csv`      |
+    | GridION/PromethION  | `fastq_pass_combined`                   | `sample_sheet_<...>.csv` at the top level (see `_find_ont_samplesheet`) |
 
     The old MiSeq directory structure only supports one demultiplexing, so its SampleSheet is at the top level of the run directory.
+    Oxford Nanopore runs aren't demultiplexed more than once. Their 'demultiplexing output' is the per-sample fastq files that are
+    combined into the `fastq_pass_combined` directory.
 
     :param run_dir_path: Path to the sequencing run directory.
     :type run_dir_path: str
-    :param instrument_type: Instrument type ('miseq', 'nextseq' or 'i100')
+    :param instrument_type: Instrument type ('miseq', 'nextseq', 'i100', 'gridion' or 'promethion')
     :type instrument_type: str
     :return: Dict with keys 'output_directory', 'fastq_directory' and 'samplesheet_path' (which is None if the SampleSheet can't be found), or None if the demultiplexing output can't be found.
     :rtype: dict[str, str | None] | None
@@ -109,6 +144,13 @@ def _find_latest_demultiplexing(run_dir_path: str, instrument_type: str) -> Opti
                 'fastq_directory': os.path.join(analysis_dir_path, "Data", "BCLConvert", "fastq"),
                 'samplesheet_path': find_samplesheet(os.path.join(analysis_dir_path, "inputs")),
             }
+
+    elif instrument_type in ONT_INSTRUMENT_TYPES:
+        latest_demultiplexing = {
+            'output_directory': run_dir_path,
+            'fastq_directory': os.path.join(run_dir_path, "fastq_pass_combined"),
+            'samplesheet_path': _find_ont_samplesheet(run_dir_path),
+        }
 
     return latest_demultiplexing
 
@@ -210,7 +252,8 @@ def _sanitize_library_id(library_id: str):
 
 def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq_extensions: list[str]) -> list[dict[str, object]]:
     """
-    Use parsed samplesheet and run info to find all libraries on the run, along with their project ID and fastq paths.
+    Use parsed samplesheet and run info to find all libraries on an Illumina run, along with their project ID and fastq paths.
+    Each library's fastq paths are indexed by read type ('R1' and 'R2'), and are None if the fastq file can't be found.
 
     :param run: The run info.
     :type run: dict[str, object]
@@ -273,16 +316,13 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
             r2_fastq_filename = None
         r1_fastq_path = os.path.join(fastq_dir, r1_fastq_filename) if r1_fastq_filename else None
         r2_fastq_path = os.path.join(fastq_dir, r2_fastq_filename) if r2_fastq_filename else None
-        if r1_fastq_path and os.path.exists(r1_fastq_path):
-            log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R1", "fastq_path": r1_fastq_path})
-            library['fastq_path_r1'] = r1_fastq_path
-        else:
-            library['fastq_path_r1'] = None
-        if r2_fastq_path and os.path.exists(r2_fastq_path):
-            log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "R2", "fastq_path": r2_fastq_path})
-            library['fastq_path_r2'] = r2_fastq_path
-        else:
-            library['fastq_path_r2'] = None
+        library['fastq_paths'] = {}
+        for read_type, fastq_path in [('R1', r1_fastq_path), ('R2', r2_fastq_path)]:
+            if fastq_path and os.path.exists(fastq_path):
+                log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": read_type, "fastq_path": fastq_path})
+                library['fastq_paths'][read_type] = fastq_path
+            else:
+                library['fastq_paths'][read_type] = None
         found_library_ids.add(library_id)
         libraries.append(library)
         
@@ -290,14 +330,66 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     return libraries
     
 
+def find_libraries_ont(run: dict[str, object], samplesheet: dict[str, object]) -> list[dict[str, object]]:
+    """
+    Use a parsed Oxford Nanopore sample sheet and run info to find all libraries on the run, along with their project ID and fastq path.
+
+    The `alias` field of the sample sheet is `<sample_id>_<project_id>`. It's split on the first underscore, so the
+    project ID may include underscores (eg. `cpo_production`), but the sample ID can't.
+
+    Fastq files for each sample are combined into a single file in the `fastq_pass_combined` directory,
+    named `<sample_id>_<barcode>_RL.fastq.gz` ('RL' for long reads).
+
+    :param run: The run info.
+    :type run: dict[str, object]
+    :param samplesheet: The parsed sample sheet.
+    :type samplesheet: dict[str, object]
+    :return: Libraries. Each library's fastq path is indexed by read type ('RL'), and is None if the fastq file can't be found.
+    :rtype: list[dict[str, object]]
+    """
+    run_id = run['run_id']
+    libraries = []
+    fastq_dir = run['fastq_directory']
+    if not os.path.isdir(fastq_dir):
+        log.error({"event_type": "find_libraries_failed", "sequencing_run_id": run_id, "fastq_directory": fastq_dir})
+        return libraries
+
+    found_library_ids = set()
+    for item in samplesheet['data']:
+        alias = (item.get('alias') or "").strip()
+        library_id, _, project_id = alias.partition('_')
+        if library_id == "" or library_id in found_library_ids:
+            continue
+        log.debug({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id})
+        barcode = (item.get('barcode') or "").strip()
+        fastq_path = os.path.join(fastq_dir, library_id + '_' + barcode + '_RL.fastq.gz') if barcode else None
+        if fastq_path and os.path.exists(fastq_path):
+            log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "RL", "fastq_path": fastq_path})
+        else:
+            log.debug({"event_type": "failed_to_find_RL_fastq", "sequencing_run_id": run_id, "library_id": library_id, "barcode": barcode, "samplesheet_project_id": project_id})
+            fastq_path = None
+        found_library_ids.add(library_id)
+        libraries.append({
+            'library_id': library_id,
+            'project_id': project_id,
+            'fastq_paths': {'RL': fastq_path},
+        })
+
+    return libraries
+
+
 MISEQ_RUN_ID_REGEX = "\\d{6}_M\\d{5}_\\d+_\\d{9}-[A-Z0-9]{5}"
 NEXTSEQ_RUN_ID_REGEX = "\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}"
 I100_RUN_ID_REGEX = "\\d{8}_SH\\d{5}_\\d+_[A-Z0-9]{10}-[A-Z0-9]{3}"
+GRIDION_RUN_ID_REGEX = "\\d{8}_\\d{4}_X\\d_[A-Z0-9]{8}_[a-z0-9]{8}$"
+PROMETHION_RUN_ID_REGEX = "\\d{8}_\\d{4}_P2S_\\d+-\\w_[A-Z0-9]{8}_[a-z0-9]{8}$"
+ONT_INSTRUMENT_TYPES = ('gridion', 'promethion')
 
 
 def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str, object]]:
     """
     Load a sequencing run, if it is ready to be symlinked. A run is ready once it has been uploaded and has passed its QC check.
+    Oxford Nanopore runs must also have had their fastq files combined.
 
     :param config: Application config.
     :type config: dict[str, object]
@@ -314,6 +406,10 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
         instrument_type = "nextseq"
     elif re.match(I100_RUN_ID_REGEX, run_id):
         instrument_type = "i100"
+    elif re.match(GRIDION_RUN_ID_REGEX, run_id):
+        instrument_type = "gridion"
+    elif re.match(PROMETHION_RUN_ID_REGEX, run_id):
+        instrument_type = "promethion"
 
     qc_check_complete_path = os.path.join(run_dir_path, "qc_check_complete.json")
     qc_check_complete_file_exists = os.path.exists(qc_check_complete_path)
@@ -336,6 +432,9 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
         'passed_run_qc_check': passed_run_qc_check,
         'determined_instrument_type': instrument_type is not None,
     }
+    if instrument_type in ONT_INSTRUMENT_TYPES:
+        # Fastq files for each sample are combined after the run is uploaded.
+        conditions_checked['fastq_combining_complete'] = os.path.exists(os.path.join(run_dir_path, "combine_fastq_complete.json"))
     if not all(conditions_checked.values()):
         log.info({"event_type": "skipped_run", "sequencing_run_id": run_id, "conditions_checked": conditions_checked})
         return None
@@ -367,7 +466,10 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
         # Already logged by the samplesheet parser.
         return None
 
-    libraries = find_libraries(run, samplesheet, config['fastq_extensions'])
+    if instrument_type in ONT_INSTRUMENT_TYPES:
+        libraries = find_libraries_ont(run, samplesheet)
+    else:
+        libraries = find_libraries(run, samplesheet, config['fastq_extensions'])
     for library in libraries:
         if library['project_id'] in config['project_id_translation']:
             samplesheet_project_id = library['project_id']
@@ -383,7 +485,8 @@ def _load_run(config: dict[str, object], run_dir_path: str) -> Optional[dict[str
 def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
     """
     Find all sequencing runs under all of the `run_parent_dirs` from the config that are ready to be symlinked.
-    Runs are found by matching sub-directory names against `MISEQ_RUN_ID_REGEX`, `NEXTSEQ_RUN_ID_REGEX` and `I100_RUN_ID_REGEX`.
+    Runs are found by matching sub-directory names against `MISEQ_RUN_ID_REGEX`, `NEXTSEQ_RUN_ID_REGEX`, `I100_RUN_ID_REGEX`,
+    `GRIDION_RUN_ID_REGEX` and `PROMETHION_RUN_ID_REGEX`.
 
     Runs in the global excluded runs list are skipped without being looked at.
 
@@ -427,7 +530,7 @@ def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
 def _symlink_filename(target: str, simplify_symlink_filenames: bool) -> str:
     """
     Determine the filename for a symlink to a fastq file. If `simplify_symlink_filenames` is set,
-    the filename is reduced to the library ID followed by `_R1.fastq.gz` or `_R2.fastq.gz`.
+    the filename is reduced to the library ID followed by `_R1.fastq.gz` or `_R2.fastq.gz` (Illumina), or `_RL.fastq.gz` (Oxford Nanopore).
 
     :param target: Path to the fastq file that the symlink will point to.
     :type target: str
@@ -440,12 +543,12 @@ def _symlink_filename(target: str, simplify_symlink_filenames: bool) -> str:
     if not simplify_symlink_filenames:
         return target_basename
 
-    r1_r2_match = re.search("_(R[12])_", target_basename)
-    if r1_r2_match:
-        r1_r2 = r1_r2_match.group(1)
+    read_type_match = re.search("_(R[12L])[_.]", target_basename)
+    if read_type_match:
+        read_type = read_type_match.group(1)
     else:
-        r1_r2 = ""
-    symlink_filename = target_basename.split('_')[0] + '_' + r1_r2 + '.fastq.gz'
+        read_type = ""
+    symlink_filename = target_basename.split('_')[0] + '_' + read_type + '.fastq.gz'
 
     return symlink_filename
 
@@ -493,8 +596,7 @@ def determine_symlinks_to_create_for_run(config: dict[str, object], run: dict[st
 
         symlinks = []
         for library in project_libraries:
-            for read_type, fastq_path_key in [('R1', 'fastq_path_r1'), ('R2', 'fastq_path_r2')]:
-                target = library[fastq_path_key]
+            for read_type, target in library['fastq_paths'].items():
                 # Defend against cases where symlink target is None
                 # See https://github.com/BCCDC-PHL/auto-fastq-symlink/issues/18
                 if target is None:

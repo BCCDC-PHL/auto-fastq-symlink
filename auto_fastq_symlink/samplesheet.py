@@ -265,6 +265,33 @@ def _parse_samplesheet_nextseq_v1(samplesheet_path):
     return samplesheet
 
 
+def parse_samplesheet_ont(samplesheet_path: str) -> dict[str, object]:
+    """
+    Parse an Oxford Nanopore (GridION or PromethION) sample sheet. It's a plain `.csv` file with one record
+    per sample. The sample ID and project ID are combined in the `alias` field, as `<sample_id>_<project_id>`.
+
+    :param samplesheet_path: Path to the sample sheet.
+    :type samplesheet_path: str
+    :return: The parsed sample sheet, with one record per sample under 'data'.
+    :rtype: dict[str, object]
+    :raises jsonschema.ValidationError: If the parsed sample sheet doesn't conform to the schema (eg. it doesn't have an `alias` field).
+    """
+    with open(samplesheet_path, 'r', encoding='utf-8-sig', newline='') as f:
+        samplesheet = {'data': list(csv.DictReader(f))}
+
+    schema_path = os.path.join(os.path.dirname(__file__), "resources", "samplesheet_ont_v1.schema.json")
+    with open(schema_path, 'r') as f:
+        schema = json.load(f)
+
+    try:
+        jsonschema.validate(instance=samplesheet, schema=schema)
+    except jsonschema.ValidationError as e:
+        log.error({"event_type": "samplesheet_validation_failed", "samplesheet_path": samplesheet_path, "schema_path": schema_path})
+        raise e
+
+    return samplesheet
+
+
 def find_samplesheets(directory: str) -> list[str]:
     """
     Find all SampleSheet files (named like `SampleSheet*.csv`) directly inside a directory.
@@ -331,7 +358,7 @@ def parse_samplesheet(samplesheet_path: str, instrument_type: str) -> dict[str, 
     """
     :param samplesheet_path:
     :type samplesheet_path: str
-    :param instrument_type: One of `miseq`, `nextseq` or `i100`
+    :param instrument_type: One of `miseq`, `nextseq`, `i100`, `gridion` or `promethion`
     :type instrument_type: str
     """
     samplesheet = None
@@ -340,6 +367,8 @@ def parse_samplesheet(samplesheet_path: str, instrument_type: str) -> dict[str, 
     elif instrument_type in ('nextseq', 'i100'):
         # MiSeq i100 SampleSheets use the same format as NextSeq SampleSheets.
         samplesheet = parse_samplesheet_nextseq(samplesheet_path)
+    elif instrument_type in ('gridion', 'promethion'):
+        samplesheet = parse_samplesheet_ont(samplesheet_path)
 
     return samplesheet
     

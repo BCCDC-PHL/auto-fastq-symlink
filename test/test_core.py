@@ -14,6 +14,10 @@ SAMPLESHEETS_DIR = os.path.join(THIS_DIR, "data", "samplesheets")
 MISEQ_RUN_ID = "220602_M00123_0300_000000000-Q5539"
 NEXTSEQ_RUN_ID = "220602_VH00123_12_AAAAAAAAA"
 I100_RUN_ID = "20250602_SH01234_0012_ASC2140000-SC3"
+GRIDION_RUN_ID = "20261015_1336_X2_FBG78506_b2f5b6a3"
+GRIDION_SAMPLESHEET_FILENAME = "sample_sheet_FBG78506_20261015_1336_b2f5b6a3.csv"
+PROMETHION_RUN_ID = "20260828_1544_P2S_00020-A_PAU96455_44eda675"
+PROMETHION_SAMPLESHEET_FILENAME = "sample_sheet_PAU96455_20260828_1544_44eda675.csv"
 
 
 def _write_miseq_samplesheet(path, libraries):
@@ -77,6 +81,28 @@ def _write_i100_samplesheet(path, libraries):
     lines += ['[Analysis_Settings]', 'Workflow,GenerateFASTQ']
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
+
+
+def _write_ont_samplesheet(path, samples):
+    """
+    Write an Oxford Nanopore sample sheet.
+
+    :param samples: List of (alias, barcode) tuples.
+    """
+    with open(path, 'w') as f:
+        f.write('flow_cell_id,experiment_id,kit,alias,barcode\n')
+        for alias, barcode in samples:
+            f.write(','.join(['FBG78506', 'exp-01', 'SQK-RBK114-24', alias, barcode]) + '\n')
+
+
+def _write_ont_fastqs(run_dir, samples):
+    """
+    :param samples: List of (sample_id, barcode) tuples.
+    """
+    fastq_dir = os.path.join(run_dir, 'fastq_pass_combined')
+    os.makedirs(fastq_dir, exist_ok=True)
+    for sample_id, barcode in samples:
+        open(os.path.join(fastq_dir, sample_id + '_' + barcode + '_RL.fastq.gz'), 'w').close()
 
 
 def _write_fastqs(fastq_dir, library_ids):
@@ -460,6 +486,117 @@ class TestCore(unittest.TestCase):
         for project_id in ['routine_testing', 'assay_development']:
             self.assertFalse(os.path.exists(self._run_symlinks_dir(project_id, MISEQ_RUN_ID)))
             self.assertTrue(os.path.exists(self._run_symlinks_dir(project_id, other_run_id)))
+
+    def _create_ont_run(self, run_id, samplesheet_filename, samples):
+        """
+        :param samples: List of (alias, barcode) tuples.
+        """
+        run_dir = os.path.join(self.runs_dir, run_id)
+        os.makedirs(run_dir)
+        _mark_run_ready(run_dir)
+        _write_ont_samplesheet(os.path.join(run_dir, samplesheet_filename), samples)
+        _write_ont_fastqs(run_dir, [(alias.split('_')[0], barcode) for alias, barcode in samples])
+        open(os.path.join(run_dir, 'combine_fastq_complete.json'), 'w').close()
+        return run_dir
+
+    def test_gridion_symlinks_created(self):
+        samples = [('S1_routine_testing', 'barcode01'), ('S10_routine_testing', 'barcode10'), ('S2_assay_development', 'barcode02'), ('S3_other_project', 'barcode03')]
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, GRIDION_SAMPLESHEET_FILENAME, samples)
+
+        self._scan_and_symlink()
+
+        fastq_dir = os.path.join(run_dir, 'fastq_pass_combined')
+        self.assertEqual(
+            {
+                'S1_RL.fastq.gz': os.path.join(fastq_dir, 'S1_barcode01_RL.fastq.gz'),
+                'S10_RL.fastq.gz': os.path.join(fastq_dir, 'S10_barcode10_RL.fastq.gz'),
+            },
+            self._symlink_targets('routine_testing', GRIDION_RUN_ID),
+        )
+        self.assertEqual(
+            {'S2_barcode02_RL.fastq.gz': os.path.join(fastq_dir, 'S2_barcode02_RL.fastq.gz')},
+            self._symlink_targets('assay_development', GRIDION_RUN_ID),
+        )
+
+    def test_promethion_symlinks_created(self):
+        run_dir = self._create_ont_run(PROMETHION_RUN_ID, PROMETHION_SAMPLESHEET_FILENAME, [('S1_routine_testing', 'barcode01')])
+
+        self._scan_and_symlink()
+
+        self.assertEqual(
+            {'S1_RL.fastq.gz': os.path.join(run_dir, 'fastq_pass_combined', 'S1_barcode01_RL.fastq.gz')},
+            self._symlink_targets('routine_testing', PROMETHION_RUN_ID),
+        )
+
+    def test_ont_alias_split_on_first_underscore(self):
+        self.config['projects']['cpo_production'] = dict(self.config['projects']['routine_testing'], fastq_symlinks_dir=os.path.join(self.symlinks_dir, 'cpo_production'))
+        self._create_ont_run(GRIDION_RUN_ID, GRIDION_SAMPLESHEET_FILENAME, [('S1_cpo_production', 'barcode01'), ('S2', 'barcode02')])
+
+        [run] = list(core.find_runs(self.config))
+
+        self.assertEqual({'S1': 'cpo_production', 'S2': None}, {library['library_id']: library['project_id'] for library in run['libraries']})
+
+    def test_ont_run_not_symlinked_until_fastq_combining_complete(self):
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, GRIDION_SAMPLESHEET_FILENAME, [('S1_routine_testing', 'barcode01')])
+        os.remove(os.path.join(run_dir, 'combine_fastq_complete.json'))
+
+        self._scan_and_symlink()
+        self.assertFalse(os.path.exists(self._run_symlinks_dir('routine_testing', GRIDION_RUN_ID)))
+
+        open(os.path.join(run_dir, 'combine_fastq_complete.json'), 'w').close()
+        self._scan_and_symlink()
+        self.assertEqual({'S1_RL.fastq.gz'}, set(self._symlink_targets('routine_testing', GRIDION_RUN_ID)))
+
+    def test_ont_expected_samplesheet_preferred(self):
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, GRIDION_SAMPLESHEET_FILENAME, [('S1_routine_testing', 'barcode01')])
+        _write_ont_samplesheet(os.path.join(run_dir, 'sample_sheet_old.csv'), [('S1_assay_development', 'barcode01')])
+
+        self.assertEqual(os.path.join(run_dir, GRIDION_SAMPLESHEET_FILENAME), core._find_latest_demultiplexing(run_dir, 'gridion')['samplesheet_path'])
+
+    def test_ont_single_samplesheet_with_unexpected_name_used(self):
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, 'sample_sheet_renamed.csv', [('S1_routine_testing', 'barcode01')])
+
+        with self.assertLogs('auto_fastq_symlink.core', level='WARNING') as logs:
+            samplesheet_path = core._find_latest_demultiplexing(run_dir, 'gridion')['samplesheet_path']
+
+        self.assertEqual(os.path.join(run_dir, 'sample_sheet_renamed.csv'), samplesheet_path)
+        self.assertEqual('using_samplesheet_with_unexpected_name', logs.records[0].msg['event_type'])
+
+    def test_ont_multiple_samplesheets_with_unexpected_names_not_used(self):
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, 'sample_sheet_a.csv', [('S1_routine_testing', 'barcode01')])
+        _write_ont_samplesheet(os.path.join(run_dir, 'sample_sheet_b.csv'), [('S1_assay_development', 'barcode01')])
+
+        with self.assertLogs('auto_fastq_symlink.core', level='ERROR') as logs:
+            self._scan_and_symlink()
+
+        self.assertEqual(['multiple_samplesheets_found', 'samplesheet_not_found'], [record.msg['event_type'] for record in logs.records])
+        self.assertFalse(os.path.exists(self.config['projects']['routine_testing']['fastq_symlinks_dir']))
+
+    def test_ont_missing_fastq_file_skipped(self):
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, GRIDION_SAMPLESHEET_FILENAME, [('S1_routine_testing', 'barcode01'), ('S2_routine_testing', 'barcode02')])
+        os.remove(os.path.join(run_dir, 'fastq_pass_combined', 'S2_barcode02_RL.fastq.gz'))
+
+        with self.assertLogs('auto_fastq_symlink.core', level='WARNING') as logs:
+            self._scan_and_symlink()
+
+        self.assertEqual({'S1_RL.fastq.gz'}, set(self._symlink_targets('routine_testing', GRIDION_RUN_ID)))
+        [warning] = [record.msg for record in logs.records if record.msg['event_type'] == 'fastq_file_not_found']
+        self.assertEqual(('S2', 'RL'), (warning['library_id'], warning['read_type']))
+
+    def test_ont_samplesheet_without_alias_not_symlinked(self):
+        run_dir = os.path.join(self.runs_dir, GRIDION_RUN_ID)
+        os.makedirs(run_dir)
+        _mark_run_ready(run_dir)
+        open(os.path.join(run_dir, 'combine_fastq_complete.json'), 'w').close()
+        _write_ont_fastqs(run_dir, [('S1', 'barcode01')])
+        with open(os.path.join(run_dir, GRIDION_SAMPLESHEET_FILENAME), 'w') as f:
+            f.write('flow_cell_id,barcode\nFBG78506,barcode01\n')
+
+        with self.assertLogs('auto_fastq_symlink.samplesheet', level='ERROR') as logs:
+            runs = list(core.find_runs(self.config))
+
+        self.assertEqual([], runs)
+        self.assertEqual('samplesheet_validation_failed', logs.records[0].msg['event_type'])
 
     def test_incomplete_tmp_dir_replaced(self):
         libraries = [('LIB-A', 'routine_testing')]
