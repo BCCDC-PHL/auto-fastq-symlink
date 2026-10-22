@@ -13,6 +13,7 @@ SAMPLESHEETS_DIR = os.path.join(THIS_DIR, "data", "samplesheets")
 
 MISEQ_RUN_ID = "220602_M00123_0300_000000000-Q5539"
 NEXTSEQ_RUN_ID = "220602_VH00123_12_AAAAAAAAA"
+I100_RUN_ID = "20250602_SH01234_0012_ASC2140000-SC3"
 
 
 def _write_miseq_samplesheet(path, libraries):
@@ -51,6 +52,31 @@ def _write_nextseq_samplesheet(path, libraries):
         output_lines.append(','.join([library_id, project_id, '', '', '', '', '']))
     with open(path, 'w') as f:
         f.write('\n'.join(output_lines) + '\n')
+
+
+def _write_i100_samplesheet(path, libraries):
+    """
+    Write a MiSeq i100 SampleSheet. The sections and settings are illustrative; the parts used for symlinking
+    (`Sample_ID` and `ProjectName` in `[Cloud_Data]`) follow the same format as NextSeq SampleSheets.
+    Includes some features that the NextSeq SampleSheet parser previously mishandled: sections that aren't
+    separated by blank lines, data rows with empty trailing fields, and a section following `[Cloud_Data]`.
+
+    :param libraries: List of (library_id, project_id) tuples.
+    """
+    lines = [
+        '[Header]', 'FileFormatVersion,2', 'RunName,i100-test', 'InstrumentPlatform,MiSeqi100Series', 'InstrumentType,MiSeqi100Plus',
+        '[Reads]', 'Read1Cycles,151', 'Read2Cycles,151', 'Index1Cycles,10', 'Index2Cycles,10',
+        '[BCLConvert_Settings]', 'SoftwareVersion,4.3.13', 'FastqCompressionFormat,gzip',
+        '[BCLConvert_Data]', 'Sample_ID,Index,Index2,OverrideCycles,Lane',
+    ]
+    for library_id, _ in libraries:
+        lines.append(','.join([library_id, 'GAACTGAGCG', 'TCGTGGAGCG', '', '']))
+    lines += ['[Cloud_Settings]', 'GeneratedVersion,1.0.0', '[Cloud_Data]', 'Sample_ID,ProjectName,LibraryName,LibraryPrepKitName,IndexAdapterKitName']
+    for library_id, project_id in libraries:
+        lines.append(','.join([library_id, project_id, '', '', '']))
+    lines += ['[Analysis_Settings]', 'Workflow,GenerateFASTQ']
+    with open(path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
 
 
 def _write_fastqs(fastq_dir, library_ids):
@@ -210,7 +236,9 @@ class TestCore(unittest.TestCase):
         run_dir = self._create_miseq_run(libraries)
         output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
 
-        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+        latest_demultiplexing = core._find_latest_demultiplexing(run_dir, 'miseq')
+
+        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), latest_demultiplexing['samplesheet_path'])
 
     def test_miseq_samplesheet_used_preferred_over_competing_samplesheets_in_alignment_dir(self):
         libraries = [('LIB-A', 'routine_testing')]
@@ -219,7 +247,9 @@ class TestCore(unittest.TestCase):
         for competing_samplesheet in ['SampleSheet.csv', 'SampleSheet_old.csv']:
             _write_miseq_samplesheet(os.path.join(output_dir, competing_samplesheet), libraries)
 
-        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+        latest_demultiplexing = core._find_latest_demultiplexing(run_dir, 'miseq')
+
+        self.assertEqual(os.path.join(output_dir, 'SampleSheetUsed.csv'), latest_demultiplexing['samplesheet_path'])
 
     def test_miseq_alignment_dir_samplesheet_other_than_samplesheet_used_ignored(self):
         libraries = [('LIB-A', 'routine_testing')]
@@ -227,17 +257,41 @@ class TestCore(unittest.TestCase):
         output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
         os.rename(os.path.join(output_dir, 'SampleSheetUsed.csv'), os.path.join(output_dir, 'SampleSheet.csv'))
 
-        self.assertEqual(os.path.join(run_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+        self.assertIsNone(core._find_latest_demultiplexing(run_dir, 'miseq')['samplesheet_path'])
 
-    def test_miseq_falls_back_to_run_level_samplesheet(self):
+    def test_miseq_v1_uses_run_level_samplesheet(self):
         libraries = [('LIB-A', 'routine_testing')]
         run_dir = self._create_miseq_run(libraries)
-        output_dir = self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
-        os.remove(os.path.join(output_dir, 'SampleSheetUsed.csv'))
+        _write_fastqs(os.path.join(run_dir, 'Data', 'Intensities', 'BaseCalls'), ['LIB-A'])
 
-        self.assertEqual(os.path.join(run_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir, 'miseq'))
+        latest_demultiplexing = core._find_latest_demultiplexing(run_dir, 'miseq')
 
-    def test_nextseq_samplesheet_selection_unchanged(self):
+        self.assertEqual(os.path.join(run_dir, 'SampleSheet.csv'), latest_demultiplexing['samplesheet_path'])
+
+    def test_no_fallback_to_run_level_samplesheet(self):
+        # The run-level SampleSheet may not match the latest demultiplexing, so a run without
+        # a SampleSheet for its latest demultiplexing isn't symlinked.
+        libraries = [('LIB-A', 'routine_testing')]
+        miseq_run_dir = self._create_miseq_run(libraries)
+        miseq_output_dir = self._add_miseq_alignment(miseq_run_dir, 1, '20220603_101010', libraries)
+        os.remove(os.path.join(miseq_output_dir, 'SampleSheetUsed.csv'))
+        nextseq_run_dir = os.path.join(self.runs_dir, NEXTSEQ_RUN_ID)
+        os.makedirs(nextseq_run_dir)
+        _mark_run_ready(nextseq_run_dir)
+        _write_nextseq_samplesheet(os.path.join(nextseq_run_dir, 'SampleSheet.csv'), libraries)
+        _write_fastqs(os.path.join(nextseq_run_dir, 'Analysis', '1', 'Data', 'fastq'), ['LIB-A'])
+        i100_run_dir = self._create_i100_run()
+        _write_i100_samplesheet(os.path.join(i100_run_dir, 'SampleSheet.csv'), libraries)
+        _write_fastqs(os.path.join(i100_run_dir, 'Analysis', '1', 'Data', 'BCLConvert', 'fastq'), ['LIB-A'])
+
+        with self.assertLogs('auto_fastq_symlink.core', level='ERROR') as logs:
+            self._scan_and_symlink()
+
+        samplesheet_not_found = {record.msg['sequencing_run_id'] for record in logs.records if record.msg['event_type'] == 'samplesheet_not_found'}
+        self.assertEqual({MISEQ_RUN_ID, NEXTSEQ_RUN_ID, I100_RUN_ID}, samplesheet_not_found)
+        self.assertFalse(os.path.exists(self.config['projects']['routine_testing']['fastq_symlinks_dir']))
+
+    def test_nextseq_samplesheet_selection(self):
         run_dir = os.path.join(self.runs_dir, NEXTSEQ_RUN_ID)
         output_dir = os.path.join(run_dir, 'Analysis', '1', 'Data')
         os.makedirs(output_dir)
@@ -245,7 +299,54 @@ class TestCore(unittest.TestCase):
         _write_nextseq_samplesheet(os.path.join(output_dir, 'SampleSheet.csv'), [('LIB-A', 'routine_testing')])
         _write_nextseq_samplesheet(os.path.join(output_dir, 'SampleSheet_old.csv'), [('LIB-A', 'routine_testing')])
 
-        self.assertEqual(os.path.join(output_dir, 'SampleSheet.csv'), core._find_samplesheet(run_dir, output_dir, 'nextseq'))
+        latest_demultiplexing = core._find_latest_demultiplexing(run_dir, 'nextseq')
+
+        self.assertEqual(os.path.join(output_dir, 'SampleSheet.csv'), latest_demultiplexing['samplesheet_path'])
+
+    def _create_i100_run(self):
+        run_dir = os.path.join(self.runs_dir, I100_RUN_ID)
+        os.makedirs(os.path.join(run_dir, 'Data', 'Intensities', 'BaseCalls', 'L001'))
+        _mark_run_ready(run_dir)
+        return run_dir
+
+    def _add_i100_analysis(self, run_dir, analysis_num, libraries):
+        analysis_dir = os.path.join(run_dir, 'Analysis', str(analysis_num))
+        os.makedirs(os.path.join(analysis_dir, 'inputs'))
+        _write_fastqs(os.path.join(analysis_dir, 'Data', 'BCLConvert', 'fastq'), [library_id for library_id, _ in libraries])
+        _write_i100_samplesheet(os.path.join(analysis_dir, 'inputs', 'SampleSheet.csv'), libraries)
+        return analysis_dir
+
+    def test_i100_symlinks_created_from_latest_analysis(self):
+        run_dir = self._create_i100_run()
+        self._add_i100_analysis(run_dir, 9, [('LIB-A', 'assay_development'), ('LIB-B', 'assay_development')])
+        latest_analysis_dir = self._add_i100_analysis(run_dir, 10, [('LIB-A', 'routine_testing'), ('LIB-B', 'assay_development')])
+
+        self._scan_and_symlink()
+
+        latest_fastq_dir = os.path.join(latest_analysis_dir, 'Data', 'BCLConvert', 'fastq')
+        self.assertEqual(
+            {
+                'LIB-A_R1.fastq.gz': os.path.join(latest_fastq_dir, 'LIB-A_S1_L001_R1_001.fastq.gz'),
+                'LIB-A_R2.fastq.gz': os.path.join(latest_fastq_dir, 'LIB-A_S1_L001_R2_001.fastq.gz'),
+            },
+            self._symlink_targets('routine_testing', I100_RUN_ID),
+        )
+        self.assertEqual(
+            {
+                'LIB-B_S2_L001_R1_001.fastq.gz': os.path.join(latest_fastq_dir, 'LIB-B_S2_L001_R1_001.fastq.gz'),
+                'LIB-B_S2_L001_R2_001.fastq.gz': os.path.join(latest_fastq_dir, 'LIB-B_S2_L001_R2_001.fastq.gz'),
+            },
+            self._symlink_targets('assay_development', I100_RUN_ID),
+        )
+
+    def test_i100_run_without_analysis_not_symlinked(self):
+        self._create_i100_run()
+
+        with self.assertLogs('auto_fastq_symlink.core', level='WARNING') as logs:
+            runs = list(core.find_runs(self.config))
+
+        self.assertEqual([], runs)
+        self.assertIn('demultiplexing_output_not_found', [record.msg['event_type'] for record in logs.records])
 
     def test_nextseq_latest_analysis_chosen_numerically(self):
         run_dir = os.path.join(self.runs_dir, NEXTSEQ_RUN_ID)

@@ -156,212 +156,100 @@ def _parse_samplesheet_miseq_v1(samplesheet_path: str) -> dict[str, object]:
     return samplesheet
 
 
-def _parse_header_section_nextseq_v1(samplesheet_path):
+def _read_sections_nextseq_v1(samplesheet_path: str) -> dict[str, list[str]]:
     """
-    """
-    header_lines = []
-    header = {}
-    header['instrument_type'] = 'NextSeq2000'
+    Split a NextSeq (or MiSeq i100) SampleSheet into its sections. Each section starts with a
+    header line like `[Cloud_Data]`, and continues until the next section header. Blank lines
+    and trailing commas are dropped.
 
-    with open(samplesheet_path, 'r') as f:
+    :param samplesheet_path: Path to the SampleSheet.
+    :type samplesheet_path: str
+    :return: Lines of each section, indexed by section name (eg. 'Cloud_Data').
+    :rtype: dict[str, list[str]]
+    """
+    sections = {}
+    section_name = None
+    with open(samplesheet_path, 'r', encoding='utf-8-sig') as f:
         for line in f:
-            if line.strip().startswith('[Header]'):
-                continue
-            if line.strip().startswith('[Reads]') or line.strip().rstrip(',') == "":
-                break
-            else:
-                header_lines.append(line.strip().rstrip(','))
+            line = line.strip().rstrip(',')
+            section_header_match = re.fullmatch("\\[(.+)\\]", line)
+            if section_header_match:
+                section_name = section_header_match.group(1)
+                sections.setdefault(section_name, [])
+            elif section_name is not None and line != "":
+                sections[section_name].append(line)
 
-    for line in header_lines:
-        header_key = util.camel_to_snake(line.split(',')[0])
-
-        if len(line.split(',')) > 1:
-            header_value = line.split(',')[1]
-        else:
-            header_value = ""
-
-        if header_key != "":
-            header[header_key] = header_value
-              
-    return header
+    return sections
 
 
-def _parse_reads_section_nextseq_v1(samplesheet_path):
+def _parse_key_value_section_nextseq_v1(lines: list[str]) -> dict[str, str]:
     """
+    Parse a section made up of `Key,Value` lines (eg. `[Header]` or `[BCLConvert_Settings]`).
+
+    :param lines: Lines of the section.
+    :type lines: list[str]
+    :return: Values, indexed by key (converted to snake_case).
+    :rtype: dict[str, str]
     """
-    reads_lines = []
-    reads = {}
-    with open(samplesheet_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('[Reads]'):
-                break
-        for line in f:
-            if line.strip().startswith('[Sequencing_Settings]') or line.strip().rstrip(',') == "":
-                break
-            reads_lines.append(line.strip().rstrip(','))
+    parsed = {}
+    for line in lines:
+        fields = line.split(',')
+        key = util.camel_to_snake(fields[0])
+        if key != "":
+            parsed[key] = fields[1] if len(fields) > 1 else ""
 
-    for line in reads_lines:
-        reads_key = util.camel_to_snake(line.split(',')[0])
-        if len(line.split(',')) > 1:
-            reads_value = int(line.split(',')[1])
-        else:
-            reads_value = ""
-
-        if reads_key != "":
-            reads[reads_key] = reads_value
-
-    return reads
+    return parsed
 
 
-def _parse_sequencing_settings_section_nextseq_v1(samplesheet_path):
+def _parse_data_section_nextseq_v1(lines: list[str]) -> list[dict[str, str]]:
     """
+    Parse a section made up of a line of column headers, followed by one line per record (eg. `[Cloud_Data]`).
+    Records with fewer fields than there are column headers (which happens when trailing fields are empty) are
+    padded with empty strings.
+
+    :param lines: Lines of the section.
+    :type lines: list[str]
+    :return: Records, with column headers converted to snake_case.
+    :rtype: list[dict[str, str]]
     """
-    sequencing_settings_lines = []
-    sequencing_settings = {}
-    with open(samplesheet_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('[Sequencing_Settings]'):
-                break
-        for line in f:
-            if line.strip().startswith('[BCLConvert_Settings]') or line.strip().rstrip(',') == "":
-                break
-            sequencing_settings_lines.append(line.strip().rstrip(','))
+    if len(lines) == 0:
+        return []
 
-    for line in sequencing_settings_lines:
-        sequencing_settings_key = util.camel_to_snake(line.split(',')[0])
-
-        if len(line.split(',')) > 1:
-            sequencing_settings_value = line.split(',')[1]
-        else:
-            sequencing_settings_value = ""
-
-        if sequencing_settings_key != "":
-            sequencing_settings[sequencing_settings_key] = sequencing_settings_value
-              
-    return sequencing_settings
-
-
-def _parse_bclconvert_settings_section_nextseq_v1(samplesheet_path):
-    """
-    """
-    bclconvert_settings_lines = []
-    bclconvert_settings = {}
-    with open(samplesheet_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('[BCLConvert_Settings]'):
-                break
-        for line in f:
-            if line.strip().startswith('[BCLConvert_Data]') or line.strip().rstrip(',') == "":
-                break
-            bclconvert_settings_lines.append(line.strip().rstrip(','))
-
-    for line in bclconvert_settings_lines:
-        bclconvert_settings_key = util.camel_to_snake(line.split(',')[0])
-
-    if len(line.split(',')) > 1:
-        bclconvert_settings_value = line.split(',')[1]
-    else:
-        bclconvert_settings_value = ""
-
-    if bclconvert_settings_key != "":
-        bclconvert_settings[bclconvert_settings_key] = bclconvert_settings_value
-              
-    return bclconvert_settings
-
-
-def _parse_bclconvert_data_section_nextseq_v1(samplesheet_path):
-    """
-    """
-    bclconvert_data_lines = []
-    bclconvert_data = []
-    with open(samplesheet_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('[BCLConvert_Data]'):
-                break
-        for line in f:
-            if line.strip().startswith('[Cloud_Settings]') or line.strip().rstrip(',') == "":
-                break
-            bclconvert_data_lines.append(line.strip().rstrip(','))
-
-    bclconvert_data_keys = [util.camel_to_snake(x) for x in bclconvert_data_lines[0].split(',')]
-    for line in bclconvert_data_lines[1:]:
-        d = {}
+    keys = [util.camel_to_snake(x) for x in lines[0].split(',')]
+    records = []
+    for line in lines[1:]:
         values = line.split(',')
-        for idx, key in enumerate(bclconvert_data_keys):
-            d[key] = values[idx]
-        bclconvert_data.append(d)
+        if all(value == "" for value in values):
+            continue
+        records.append({key: values[idx] if idx < len(values) else "" for idx, key in enumerate(keys)})
 
-    return bclconvert_data
-
-
-def _parse_cloud_settings_section_nextseq_v1(samplesheet_path):
-    """
-    """
-    cloud_settings_lines = []
-    cloud_settings = {}
-    with open(samplesheet_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('[Cloud_Settings]'):
-                break
-        for line in f:
-            if line.strip().startswith('[BCLConvert_Settings]') or line.strip().rstrip(',') == "":
-                break
-            cloud_settings_lines.append(line.strip().rstrip(','))
-
-    for line in cloud_settings_lines:
-        cloud_settings_key = util.camel_to_snake(line.split(',')[0])
-
-        if len(line.split(',')) > 1:
-            cloud_settings_value = line.split(',')[1]
-        else:
-            cloud_settings_value = ""
-
-        if cloud_settings_key != "":
-            cloud_settings[cloud_settings_key] = cloud_settings_value
-              
-    return cloud_settings
-
-
-def _parse_cloud_data_section_nextseq_v1(samplesheet_path):
-    cloud_data_lines = []
-    cloud_data = []
-    with open(samplesheet_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('[Cloud_Data]'):
-                break
-        for line in f:
-            if line.strip().startswith('[Cloud_Settings]') or line.strip().rstrip(',') == "":
-                break
-            cloud_data_lines.append(line.strip().rstrip(','))
-
-    if cloud_data_lines:
-        cloud_data_keys = [util.camel_to_snake(x) for x in cloud_data_lines[0].split(',')]
-        for line in cloud_data_lines[1:]:
-            d = {}
-            values = line.strip().split(',')
-            if not all([x == '' for x in values]):
-                for idx, key in enumerate(cloud_data_keys):
-                    try:
-                        d[key] = values[idx]
-                    except IndexError as e:
-                        d[key] = ""
-                cloud_data.append(d)
-  
-    return cloud_data
-
+    return records
 
 
 def _parse_samplesheet_nextseq_v1(samplesheet_path):
     """
+    Parse a NextSeq SampleSheet. MiSeq i100 SampleSheets use the same format.
+    Only the `[Cloud_Data]` section is required.
+
+    :param samplesheet_path: Path to SampleSheet to be parsed
+    :type samplesheet_path: str
+    :return: The parsed SampleSheet
+    :rtype: dict[str, object]
+    :raises jsonschema.ValidationError: If the parsed samplesheet doesn't conform to the schema.
     """
+    sections = _read_sections_nextseq_v1(samplesheet_path)
+
     samplesheet = {}
-    samplesheet['header'] = _parse_header_section_nextseq_v1(samplesheet_path)
-    samplesheet['reads'] = _parse_reads_section_nextseq_v1(samplesheet_path)
-    samplesheet['sequencing_settings'] = _parse_sequencing_settings_section_nextseq_v1(samplesheet_path)
-    samplesheet['bclconvert_settings'] = _parse_bclconvert_settings_section_nextseq_v1(samplesheet_path)
-    samplesheet['bclconvert_data'] = _parse_bclconvert_data_section_nextseq_v1(samplesheet_path)
-    samplesheet['cloud_settings'] = _parse_cloud_settings_section_nextseq_v1(samplesheet_path)
-    samplesheet['cloud_data'] = _parse_cloud_data_section_nextseq_v1(samplesheet_path)
+    samplesheet['header'] = {'instrument_type': 'NextSeq2000'}
+    samplesheet['header'].update(_parse_key_value_section_nextseq_v1(sections.get('Header', [])))
+    samplesheet['reads'] = {}
+    for key, value in _parse_key_value_section_nextseq_v1(sections.get('Reads', [])).items():
+        samplesheet['reads'][key] = int(value) if value.isdigit() else value
+    samplesheet['sequencing_settings'] = _parse_key_value_section_nextseq_v1(sections.get('Sequencing_Settings', []))
+    samplesheet['bclconvert_settings'] = _parse_key_value_section_nextseq_v1(sections.get('BCLConvert_Settings', []))
+    samplesheet['bclconvert_data'] = _parse_data_section_nextseq_v1(sections.get('BCLConvert_Data', []))
+    samplesheet['cloud_settings'] = _parse_key_value_section_nextseq_v1(sections.get('Cloud_Settings', []))
+    samplesheet['cloud_data'] = _parse_data_section_nextseq_v1(sections.get('Cloud_Data', []))
 
     schema_path = os.path.join(os.path.dirname(__file__), "resources", "samplesheet_nextseq_v1.schema.json")
     schema = None
@@ -443,13 +331,14 @@ def parse_samplesheet(samplesheet_path: str, instrument_type: str) -> dict[str, 
     """
     :param samplesheet_path:
     :type samplesheet_path: str
-    :param instrument_type: One of `miseq` or `nextseq`
+    :param instrument_type: One of `miseq`, `nextseq` or `i100`
     :type instrument_type: str
     """
     samplesheet = None
     if instrument_type == 'miseq':
         samplesheet = parse_samplesheet_miseq(samplesheet_path)
-    elif instrument_type == 'nextseq':
+    elif instrument_type in ('nextseq', 'i100'):
+        # MiSeq i100 SampleSheets use the same format as NextSeq SampleSheets.
         samplesheet = parse_samplesheet_nextseq(samplesheet_path)
 
     return samplesheet
