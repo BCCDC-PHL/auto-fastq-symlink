@@ -74,8 +74,8 @@ REQUIRED_CONFIG_KEYS = ['run_parent_dirs', 'projects_definition_file', 'fastq_ex
 
 def load_config(config_path: str) -> dict[str, object]:
     """
-    Load the application config, along with the projects definition file, project ID translation file
-    and exclusion lists that it refers to.
+    Load the application config, along with the projects definition file, project ID translation file,
+    global excluded runs list and per-project exclusion lists that it refers to.
 
     Raises if the config file (or a file it refers to) can't be loaded or is invalid. In particular, if an
     exclusion list can't be loaded we shouldn't proceed with that config, or we might create symlinks
@@ -97,6 +97,12 @@ def load_config(config_path: str) -> dict[str, object]:
 
     if 'scan_interval_seconds' in config:
         config['scan_interval_seconds'] = float(config['scan_interval_seconds'])
+
+    # Runs in the global excluded runs list aren't scanned at all, for any project.
+    if 'excluded_runs_list' in config:
+        config['excluded_runs'] = set(_parse_list(config['excluded_runs_list']))
+    else:
+        config['excluded_runs'] = set()
 
     projects = parse_projects_definition_file(config['projects_definition_file'])
     config['projects'] = projects

@@ -49,6 +49,24 @@ class TestLoadConfig(unittest.TestCase):
         self.assertTrue(project['simplify_symlink_filenames'])
         self.assertEqual({}, config['project_id_translation'])
         self.assertEqual(60.0, config['scan_interval_seconds'])
+        self.assertEqual(set(), config['excluded_runs'])
+
+    def test_global_excluded_runs_list_loaded(self):
+        global_excluded_runs_path = os.path.join(self.tmp_dir, 'global_excluded_runs.csv')
+        with open(global_excluded_runs_path, 'w') as f:
+            f.write('220602_M00123_0300_000000000-Q5539\n20250602_SH01234_0012_ASC2140000-SC3\n')
+        self.config['excluded_runs_list'] = global_excluded_runs_path
+        self._write_config()
+
+        config = load_config(self.config_path)
+
+        self.assertEqual({'220602_M00123_0300_000000000-Q5539', '20250602_SH01234_0012_ASC2140000-SC3'}, config['excluded_runs'])
+
+    def test_missing_global_excluded_runs_list_raises(self):
+        self.config['excluded_runs_list'] = os.path.join(self.tmp_dir, 'missing.csv')
+        self._write_config()
+
+        self.assertRaises(FileNotFoundError, load_config, self.config_path)
 
     def test_missing_excluded_runs_list_raises(self):
         self._write_projects(os.path.join(self.tmp_dir, 'missing.csv'), self.excluded_libraries_path)

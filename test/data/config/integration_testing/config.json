@@ -6,6 +6,7 @@
     ],
     "projects_definition_file": "test/data/config/integration_testing/projects.csv",
     "project_id_translation_file": "test/data/config/integration_testing/project_id_translation.csv",
+    "excluded_runs_list": "test/data/config/integration_testing/excluded_runs.csv",
     "scan_interval_seconds": 0,
     "fastq_extensions": [
         ".fastq",
