@@ -2,6 +2,8 @@
 ./test_*
 *.db
 regen_db.sh
+# Local dev config, which may have system-specific paths. See config_template.json
+dev-config.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

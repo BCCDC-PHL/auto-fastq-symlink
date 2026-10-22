@@ -3,7 +3,7 @@ from setuptools import setup, find_namespace_packages
 
 setup(
     name='auto-fastq-symlink',
-    version='0.1.1',
+    version='1.0.0',
     packages=find_namespace_packages(),
     entry_points={
         "console_scripts": [
@@ -15,11 +15,7 @@ setup(
         "auto_fastq_symlink.resources": ["*.json"],
     },
     install_requires=[
-        "sqlalchemy==1.4.40",
-        "alembic==1.8.0",
         "jsonschema",
-        "uvicorn",
-        "fastapi",
     ],
     description=' Automated symlinking of sequence data',
     url='https://github.com/BCCDC-PHL/auto-fastq-symlink',
