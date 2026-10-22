@@ -5,6 +5,8 @@
         "/path/to/VH00123/22"
     ],
     "projects_definition_file": "/path/to/projects.csv",
+    "project_id_translation_file": "/path/to/project_id_translation.csv",
+    "excluded_runs_list": "/path/to/excluded_runs.csv",
     "scan_interval_seconds": 30,
     "fastq_extensions": [
         ".fastq",

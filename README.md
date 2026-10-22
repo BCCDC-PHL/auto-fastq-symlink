@@ -26,6 +26,8 @@ The config file is `.json` format with the following structure:
 }
 ```
 
+A template with all of the config settings is in [`config_template.json`](config_template.json). The `project_id_translation_file` and `excluded_runs_list` settings are optional (see [Project ID Translation](#project-id-translation) and [Global Excluded Runs](#global-excluded-runs)), and can be removed if they aren't needed. If they're set, the files they refer to must exist, or the application won't start.
+
 Each of the `run_parent_dirs` will be scanned for sequencing run output directories.
 Illumina MiSeq, NextSeq and MiSeq i100, and Oxford Nanopore GridION and PromethION output directories are supported. The instrument type is determined from the format of the run output directory name (the run ID):
 
