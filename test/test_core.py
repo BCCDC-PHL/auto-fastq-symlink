@@ -583,6 +583,31 @@ class TestCore(unittest.TestCase):
         [warning] = [record.msg for record in logs.records if record.msg['event_type'] == 'fastq_file_not_found']
         self.assertEqual(('S2', 'RL'), (warning['library_id'], warning['read_type']))
 
+    def test_ont_samplesheet_values_cannot_point_outside_fastq_dir(self):
+        run_dir = self._create_ont_run(GRIDION_RUN_ID, GRIDION_SAMPLESHEET_FILENAME, [('S1_routine_testing', 'barcode01')])
+        outside_dir = os.path.join(self.tmp_dir, 'private')
+        os.makedirs(outside_dir)
+        open(os.path.join(outside_dir, 'S2_barcode02_RL.fastq.gz'), 'w').close()
+        open(os.path.join(outside_dir, 'S3_RL.fastq.gz'), 'w').close()
+        relative_outside_dir = os.path.relpath(outside_dir, os.path.join(run_dir, 'fastq_pass_combined'))
+        bad_samples = [
+            (relative_outside_dir + '/S2_routine_testing', 'barcode02'),  # relative path in the sample ID
+            (outside_dir + '/S2_routine_testing', 'barcode02'),           # absolute path in the sample ID
+            ('S3_routine_testing', '../' + relative_outside_dir + '/S3'),  # path in the barcode
+            ('.._routine_testing', 'barcode04'),
+        ]
+        _write_ont_samplesheet(os.path.join(run_dir, GRIDION_SAMPLESHEET_FILENAME), [('S1_routine_testing', 'barcode01')] + bad_samples)
+        # Check the bad sample ID would otherwise reach the file outside the fastq dir.
+        fastq_dir = os.path.join(run_dir, 'fastq_pass_combined')
+        self.assertTrue(os.path.exists(os.path.join(fastq_dir, relative_outside_dir + '/S2_barcode02_RL.fastq.gz')))
+
+        with self.assertLogs('auto_fastq_symlink.core', level='WARNING') as logs:
+            self._scan_and_symlink()
+
+        self.assertEqual({'S1_RL.fastq.gz': os.path.join(fastq_dir, 'S1_barcode01_RL.fastq.gz')}, self._symlink_targets('routine_testing', GRIDION_RUN_ID))
+        invalid = [record.msg for record in logs.records if record.msg['event_type'] == 'invalid_samplesheet_value']
+        self.assertEqual(len(bad_samples), len(invalid))
+
     def test_ont_samplesheet_without_alias_not_symlinked(self):
         run_dir = os.path.join(self.runs_dir, GRIDION_RUN_ID)
         os.makedirs(run_dir)

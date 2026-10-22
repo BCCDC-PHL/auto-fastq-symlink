@@ -330,6 +330,18 @@ def find_libraries(run: dict[str, object], samplesheet: dict[str, object], fastq
     return libraries
     
 
+def _is_valid_filename_component(value: str) -> bool:
+    """
+    Check that a value can safely be used as part of a filename, without referring to another directory.
+
+    :param value: The value to check.
+    :type value: str
+    :return: False if the value contains a path separator or null byte, or is '.' or '..'.
+    :rtype: bool
+    """
+    return not ('/' in value or os.sep in value or '\x00' in value or value in ('.', '..'))
+
+
 def find_libraries_ont(run: dict[str, object], samplesheet: dict[str, object]) -> list[dict[str, object]]:
     """
     Use a parsed Oxford Nanopore sample sheet and run info to find all libraries on the run, along with their project ID and fastq path.
@@ -354,16 +366,24 @@ def find_libraries_ont(run: dict[str, object], samplesheet: dict[str, object]) -
         log.error({"event_type": "find_libraries_failed", "sequencing_run_id": run_id, "fastq_directory": fastq_dir})
         return libraries
 
+    # Only files directly inside the fastq directory can be symlinked, whatever the sample sheet says.
+    fastq_filenames = set(entry.name for entry in os.scandir(fastq_dir) if entry.is_file())
     found_library_ids = set()
     for item in samplesheet['data']:
         alias = (item.get('alias') or "").strip()
         library_id, _, project_id = alias.partition('_')
         if library_id == "" or library_id in found_library_ids:
             continue
-        log.debug({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id})
         barcode = (item.get('barcode') or "").strip()
-        fastq_path = os.path.join(fastq_dir, library_id + '_' + barcode + '_RL.fastq.gz') if barcode else None
-        if fastq_path and os.path.exists(fastq_path):
+        # The sample ID and barcode are used to build the fastq filename, so they mustn't be able to
+        # point outside the fastq directory (eg. a sample ID like '../other_dir/S1').
+        if not all(_is_valid_filename_component(value) for value in [library_id, barcode] if value != ""):
+            log.warning({"event_type": "invalid_samplesheet_value", "sequencing_run_id": run_id, "alias": alias, "barcode": barcode})
+            continue
+        log.debug({"event_type": "found_library", "library_id": library_id, "samplesheet_project_id": project_id})
+        fastq_filename = library_id + '_' + barcode + '_RL.fastq.gz'
+        if barcode and fastq_filename in fastq_filenames:
+            fastq_path = os.path.join(fastq_dir, fastq_filename)
             log.debug({"event_type": "found_library_fastq_file", "library_id": library_id, "read_type": "RL", "fastq_path": fastq_path})
         else:
             log.debug({"event_type": "failed_to_find_RL_fastq", "sequencing_run_id": run_id, "library_id": library_id, "barcode": barcode, "samplesheet_project_id": project_id})
