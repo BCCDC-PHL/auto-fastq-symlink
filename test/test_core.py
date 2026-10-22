@@ -102,6 +102,7 @@ class TestCore(unittest.TestCase):
             'run_parent_dirs': [self.runs_dir],
             'fastq_extensions': ['.fastq.gz'],
             'project_id_translation': {},
+            'excluded_runs': set(),
             'projects': {
                 'routine_testing': {
                     'fastq_symlinks_dir': os.path.join(self.symlinks_dir, 'routine_testing'),
@@ -439,6 +440,26 @@ class TestCore(unittest.TestCase):
 
         self.assertEqual([MISEQ_RUN_ID], [run['run_id'] for run in runs])
         self.assertEqual('failed_to_scan_run_parent_dir', logs.records[0].msg['event_type'])
+
+    def test_globally_excluded_run_not_scanned(self):
+        libraries = [('LIB-A', 'routine_testing'), ('LIB-B', 'assay_development')]
+        run_dir = self._create_miseq_run(libraries)
+        self._add_miseq_alignment(run_dir, 1, '20220603_101010', libraries)
+        other_run_id = '220603_M00123_0301_000000000-Q5540'
+        other_run_dir = os.path.join(self.runs_dir, other_run_id)
+        os.makedirs(other_run_dir)
+        _write_miseq_samplesheet(os.path.join(other_run_dir, 'SampleSheet.csv'), libraries)
+        _mark_run_ready(other_run_dir)
+        self._add_miseq_alignment(other_run_dir, 1, '20220603_101010', libraries)
+        self.config['excluded_runs'] = {MISEQ_RUN_ID}
+
+        with mock.patch('auto_fastq_symlink.core._load_run', side_effect=core._load_run) as load_run:
+            self._scan_and_symlink()
+
+        self.assertEqual([other_run_dir], [call.args[1] for call in load_run.call_args_list])
+        for project_id in ['routine_testing', 'assay_development']:
+            self.assertFalse(os.path.exists(self._run_symlinks_dir(project_id, MISEQ_RUN_ID)))
+            self.assertTrue(os.path.exists(self._run_symlinks_dir(project_id, other_run_id)))
 
     def test_incomplete_tmp_dir_replaced(self):
         libraries = [('LIB-A', 'routine_testing')]

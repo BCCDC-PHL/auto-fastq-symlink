@@ -385,6 +385,8 @@ def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
     Find all sequencing runs under all of the `run_parent_dirs` from the config that are ready to be symlinked.
     Runs are found by matching sub-directory names against `MISEQ_RUN_ID_REGEX`, `NEXTSEQ_RUN_ID_REGEX` and `I100_RUN_ID_REGEX`.
 
+    Runs in the global excluded runs list are skipped without being looked at.
+
     A problem with one run directory (or one run parent dir) is logged, and doesn't stop other runs from being found.
     The run will be tried again on the next scan.
 
@@ -403,6 +405,9 @@ def find_runs(config: dict[str, object]) -> Iterable[dict[str, object]]:
             continue
 
         for subdir in subdirs:
+            if subdir.name in config['excluded_runs']:
+                log.debug({"event_type": "excluded_run_skipped", "sequencing_run_id": subdir.name})
+                continue
             try:
                 run = _load_run(config, subdir.path)
             except OSError as e:

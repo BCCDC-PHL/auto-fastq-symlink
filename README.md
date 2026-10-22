@@ -64,6 +64,28 @@ sample-238
 
 If the value for the `simplify_symlink_filenames` field is set to `True` (or one of these: `true`, `T`, `t` or `1`), then the symlinks will be renamed to include only the library ID, followed by `_R1.fastq.gz` or `_R2.fastq.gz`. This feature is useful when symlinking to the illumina fastq files that the sequencers produce, which include additional run-specific tags in the filename (like: `mylibrary_S23_L001_R1_001.fastq.gz`, etc.). If the `simplify_symlink_filenames` field is set to `False` (or one of these: `false`, `F`, `f` or `0`), then the filenames of the symlinks will match the filenames of the target files.
 
+### Global Excluded Runs
+
+Runs can also be excluded for all projects, by adding an optional `"excluded_runs_list"` entry to the config file:
+
+```json
+{
+    "run_parent_dirs": [
+        "/path/to/sequencers/M00123/runs"
+    ],
+    "projects_definition_file": "/path/to/projects.csv",
+    "excluded_runs_list": "/path/to/excluded_runs.csv",
+    "scan_interval_seconds": 2,
+    "fastq_extensions": [
+        ".fastq.gz"
+    ]
+}
+```
+
+The global excluded runs list has the same format as the per-project `excluded_runs_list` files: one run ID per line, with no header. Excluded runs aren't scanned at all: their run directories aren't read, so no symlinks are created for them for any project, and no errors are logged for them. This can be used to silence a run directory that is broken or unreadable. Changes to the list take effect on the next scan. Excluding a run doesn't remove any symlinks that were already created for it.
+
+Like the per-project exclusion lists, if the global excluded runs list is set in the config but can't be loaded, the application won't start (or, if it's already running, it will continue with the last valid config).
+
 ### Project ID Translation
 
 It may be the case that we don't want to use the exact project IDs that were provided in the SampleSheet files, or we want to translate a set of SampleSheet project IDs into a single project for symlinking.
