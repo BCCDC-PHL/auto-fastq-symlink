@@ -5,7 +5,7 @@
         "/path/to/VH00123/22"
     ],
     "projects_definition_file": "/path/to/projects.csv",
-    "scan_interval_seconds": 2,
+    "scan_interval_seconds": 30,
     "fastq_extensions": [
         ".fastq",
         ".fastq.gz",
